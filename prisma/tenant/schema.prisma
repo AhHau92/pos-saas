@@ -1,0 +1,623 @@
+// ─────────────────────────────────────────────────────────────
+// Tenant DB: one database per customer (e.g. pos_t_mobilerelation).
+// All money fields are integer cents (suffix "Cents").
+// Table ownership by module is documented in docs/01-architecture.md
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/tenant"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────── Enums ─────────────
+
+enum UserRole {
+  OWNER
+  MANAGER
+  CASHIER
+}
+
+/// SERIALIZED = tracked per unit by IMEI / serial number (phones, tablets, laptops)
+/// NON_SERIALIZED = tracked by quantity only (cases, chargers, screen protectors)
+/// SERVICE = no stock (installation fee, repair labour)
+enum ProductType {
+  SERIALIZED
+  NON_SERIALIZED
+  SERVICE
+}
+
+enum ItemCondition {
+  NEW
+  USED
+  REFURBISHED
+}
+
+/// See docs/03-inventory-states.md for the state machine
+enum StockUnitStatus {
+  IN_STOCK
+  IN_TRANSIT
+  SOLD
+  DEFECTIVE
+  WRITTEN_OFF
+}
+
+enum MovementType {
+  PURCHASE_RECEIPT
+  SALE
+  SALE_RETURN
+  TRANSFER_OUT
+  TRANSFER_IN
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+}
+
+enum DocumentType {
+  GOODS_RECEIPT
+  SALE
+  REFUND
+  TRANSFER
+  ADJUSTMENT
+}
+
+enum AdjustmentReason {
+  OPENING_STOCK
+  STOCK_COUNT
+  DAMAGED
+  LOST
+  FOUND
+  REPAIRED
+  OTHER
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum TransferStatus {
+  DRAFT
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+}
+
+enum SaleStatus {
+  COMPLETED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum RefundDisposition {
+  RESTOCK
+  DEFECTIVE
+}
+
+// ───────────── Organisation & settings ─────────────
+
+/// Single row (id = 1)
+model BusinessProfile {
+  id                Int      @id @default(1)
+  name              String
+  /// Company registration no. (UEN in Singapore)
+  registrationNo    String?
+  /// GST registration no.
+  taxRegistrationNo String?
+  address           String?
+  phone             String?
+  email             String?
+  currency          String   @default("SGD")
+  taxName           String   @default("GST")
+  /// Basis points: 900 = 9.00%
+  taxRateBps        Int      @default(900)
+  /// true = prices already include tax (Singapore retail default)
+  taxInclusive      Boolean  @default(true)
+  receiptFooter     String?
+  updatedAt         DateTime @updatedAt
+}
+
+model Outlet {
+  id        String   @id @default(cuid())
+  /// Short code, used as sales receipt prefix, e.g. "HQ"
+  code      String   @unique
+  name      String
+  address   String?
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]              @relation("UserDefaultOutlet")
+  stockLevels    StockLevel[]
+  stockUnits     StockUnit[]
+  unitEvents     StockUnitEvent[]
+  movements      InventoryMovement[]
+  adjustments    StockAdjustment[]
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+  transfersOut   StockTransfer[]     @relation("TransferFrom")
+  transfersIn    StockTransfer[]     @relation("TransferTo")
+  sales          Sale[]
+  refunds        Refund[]
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String
+  passwordHash    String
+  role            UserRole  @default(CASHIER)
+  defaultOutletId String?
+  defaultOutlet   Outlet?   @relation("UserDefaultOutlet", fields: [defaultOutletId], references: [id], onDelete: SetNull)
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  salesAsCashier      Sale[]              @relation("SaleCashier")
+  refundsCreated      Refund[]            @relation("RefundCreatedBy")
+  purchaseOrders      PurchaseOrder[]     @relation("PurchaseOrderCreatedBy")
+  goodsReceipts       GoodsReceipt[]      @relation("GoodsReceiptReceivedBy")
+  transfersCreated    StockTransfer[]     @relation("TransferCreatedBy")
+  transfersDispatched StockTransfer[]     @relation("TransferDispatchedBy")
+  transfersReceived   StockTransfer[]     @relation("TransferReceivedBy")
+  movements           InventoryMovement[]
+  unitEvents          StockUnitEvent[]
+  adjustments         StockAdjustment[]
+}
+
+/// Running counters for document numbers (PO-2026-00001 ...)
+model DocumentSequence {
+  key   String @id
+  value Int    @default(0)
+}
+
+// ───────────── ① Products ─────────────
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  products  Product[]
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  products  Product[]
+}
+
+/// A model, e.g. "iPhone 16 Pro"
+model Product {
+  id          String           @id @default(cuid())
+  name        String
+  type        ProductType      @default(SERIALIZED)
+  brandId     String?
+  brand       Brand?           @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  categoryId  String?
+  category    Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  description String?
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  variants    ProductVariant[]
+
+  @@index([name])
+}
+
+/// A sellable SKU: model + colour + storage + condition
+model ProductVariant {
+  id         String        @id @default(cuid())
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku        String        @unique
+  barcode    String?       @unique
+  color      String?
+  storage    String?
+  ram        String?
+  condition  ItemCondition @default(NEW)
+  /// Default retail price
+  priceCents Int           @default(0)
+  /// Moving average cost (non-serialized) / reference cost (serialized)
+  costCents  Int           @default(0)
+  /// Low-stock alert threshold per outlet (0 = no alert)
+  minStock   Int           @default(0)
+  isActive   Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  stockLevels        StockLevel[]
+  stockUnits         StockUnit[]
+  movements          InventoryMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  goodsReceiptItems  GoodsReceiptItem[]
+  transferItems      StockTransferItem[]
+  saleItems          SaleItem[]
+
+  @@index([productId])
+}
+
+// ───────────── ② Inventory ─────────────
+
+/// Sellable on-hand quantity per outlet per SKU
+model StockLevel {
+  id        String         @id @default(cuid())
+  outletId  String
+  outlet    Outlet         @relation(fields: [outletId], references: [id])
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  quantity  Int            @default(0)
+  updatedAt DateTime       @updatedAt
+
+  @@unique([outletId, variantId])
+  @@index([variantId])
+}
+
+/// One physical serialized item (phone / tablet / laptop)
+model StockUnit {
+  id                 String            @id @default(cuid())
+  variantId          String
+  variant            ProductVariant    @relation(fields: [variantId], references: [id])
+  /// Current (or last) outlet
+  outletId           String
+  outlet             Outlet            @relation(fields: [outletId], references: [id])
+  status             StockUnitStatus   @default(IN_STOCK)
+  imei               String?           @unique
+  imei2              String?
+  serialNumber       String?           @unique
+  costCents          Int               @default(0)
+  /// Optional per-unit selling price (e.g. used phones)
+  priceCents         Int?
+  /// Used-phone grade, e.g. A / B / C
+  grade              String?
+  /// Battery health in percent
+  batteryHealth      Int?
+  notes              String?
+  goodsReceiptItemId String?
+  goodsReceiptItem   GoodsReceiptItem? @relation(fields: [goodsReceiptItemId], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  events        StockUnitEvent[]
+  movements     InventoryMovement[]
+  transferItems StockTransferItem[]
+  saleItems     SaleItem[]
+
+  @@index([variantId, outletId, status])
+  @@index([outletId, status])
+  @@index([imei2])
+}
+
+/// Status history of a StockUnit (IMEI lifecycle)
+model StockUnitEvent {
+  id          String           @id @default(cuid())
+  stockUnitId String
+  stockUnit   StockUnit        @relation(fields: [stockUnitId], references: [id], onDelete: Cascade)
+  fromStatus  StockUnitStatus?
+  toStatus    StockUnitStatus
+  outletId    String?
+  outlet      Outlet?          @relation(fields: [outletId], references: [id])
+  refType     DocumentType
+  refId       String
+  refNo       String
+  note        String?
+  userId      String?
+  user        User?            @relation(fields: [userId], references: [id])
+  createdAt   DateTime         @default(now())
+
+  @@index([stockUnitId, createdAt])
+}
+
+/// Stock ledger. Append-only. quantity is signed (+ in / - out).
+model InventoryMovement {
+  id            String         @id @default(cuid())
+  outletId      String
+  outlet        Outlet         @relation(fields: [outletId], references: [id])
+  variantId     String
+  variant       ProductVariant @relation(fields: [variantId], references: [id])
+  stockUnitId   String?
+  stockUnit     StockUnit?     @relation(fields: [stockUnitId], references: [id])
+  type          MovementType
+  quantity      Int
+  /// Outlet stock of this SKU after this movement
+  balanceAfter  Int
+  unitCostCents Int            @default(0)
+  refType       DocumentType
+  refId         String
+  refNo         String
+  note          String?
+  userId        String?
+  user          User?          @relation(fields: [userId], references: [id])
+  createdAt     DateTime       @default(now())
+
+  @@index([outletId, variantId, createdAt])
+  @@index([refType, refId])
+  @@index([createdAt])
+}
+
+/// Header for manual stock adjustments; lines are InventoryMovement / StockUnitEvent rows with refType = ADJUSTMENT
+model StockAdjustment {
+  id          String           @id @default(cuid())
+  number      String           @unique
+  outletId    String
+  outlet      Outlet           @relation(fields: [outletId], references: [id])
+  reason      AdjustmentReason
+  note        String?
+  createdById String
+  createdBy   User             @relation(fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+}
+
+// ───────────── ③ Purchasing ─────────────
+
+model Supplier {
+  id             String          @id @default(cuid())
+  name           String
+  contactName    String?
+  phone          String?
+  email          String?
+  address        String?
+  notes          String?
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+
+  @@index([name])
+}
+
+model PurchaseOrder {
+  id          String              @id @default(cuid())
+  number      String              @unique
+  supplierId  String
+  supplier    Supplier            @relation(fields: [supplierId], references: [id])
+  /// Receiving outlet
+  outletId    String
+  outlet      Outlet              @relation(fields: [outletId], references: [id])
+  status      PurchaseOrderStatus @default(DRAFT)
+  expectedAt  DateTime?
+  orderedAt   DateTime?
+  notes       String?
+  totalCents  Int                 @default(0)
+  createdById String
+  createdBy   User                @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  items       PurchaseOrderItem[]
+  receipts    GoodsReceipt[]
+
+  @@index([status])
+  @@index([supplierId])
+}
+
+model PurchaseOrderItem {
+  id               String             @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  variantId        String
+  variant          ProductVariant     @relation(fields: [variantId], references: [id])
+  quantity         Int
+  receivedQuantity Int                @default(0)
+  unitCostCents    Int
+  receiptItems     GoodsReceiptItem[]
+
+  @@unique([purchaseOrderId, variantId])
+}
+
+/// GRN: one delivery received against a purchase order
+model GoodsReceipt {
+  id              String             @id @default(cuid())
+  number          String             @unique
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id])
+  supplierId      String
+  supplier        Supplier           @relation(fields: [supplierId], references: [id])
+  outletId        String
+  outlet          Outlet             @relation(fields: [outletId], references: [id])
+  notes           String?
+  totalCents      Int                @default(0)
+  receivedById    String
+  receivedBy      User               @relation("GoodsReceiptReceivedBy", fields: [receivedById], references: [id])
+  receivedAt      DateTime           @default(now())
+  items           GoodsReceiptItem[]
+
+  @@index([purchaseOrderId])
+}
+
+model GoodsReceiptItem {
+  id                  String            @id @default(cuid())
+  goodsReceiptId      String
+  goodsReceipt        GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id])
+  variantId           String
+  variant             ProductVariant    @relation(fields: [variantId], references: [id])
+  quantity            Int
+  unitCostCents       Int
+  stockUnits          StockUnit[]
+}
+
+// ───────────── ④ Stock transfers ─────────────
+
+model StockTransfer {
+  id             String              @id @default(cuid())
+  number         String              @unique
+  fromOutletId   String
+  fromOutlet     Outlet              @relation("TransferFrom", fields: [fromOutletId], references: [id])
+  toOutletId     String
+  toOutlet       Outlet              @relation("TransferTo", fields: [toOutletId], references: [id])
+  status         TransferStatus      @default(DRAFT)
+  notes          String?
+  createdById    String
+  createdBy      User                @relation("TransferCreatedBy", fields: [createdById], references: [id])
+  dispatchedById String?
+  dispatchedBy   User?               @relation("TransferDispatchedBy", fields: [dispatchedById], references: [id])
+  dispatchedAt   DateTime?
+  receivedById   String?
+  receivedBy     User?               @relation("TransferReceivedBy", fields: [receivedById], references: [id])
+  receivedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  items          StockTransferItem[]
+
+  @@index([status])
+  @@index([fromOutletId])
+  @@index([toOutletId])
+}
+
+/// Serialized items: one row per unit (stockUnitId set, quantity 1). Others: one row per SKU.
+model StockTransferItem {
+  id            String         @id @default(cuid())
+  transferId    String
+  transfer      StockTransfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  variantId     String
+  variant       ProductVariant @relation(fields: [variantId], references: [id])
+  stockUnitId   String?
+  stockUnit     StockUnit?     @relation(fields: [stockUnitId], references: [id])
+  quantity      Int
+  unitCostCents Int            @default(0)
+
+  @@index([transferId])
+}
+
+// ───────────── ⑤ POS sales ─────────────
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?  @unique
+  email     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sales     Sale[]
+}
+
+model PaymentMethod {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  /// Only cash payments can be over-tendered (change given)
+  isCash    Boolean   @default(false)
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  payments  Payment[]
+  refunds   Refund[]
+}
+
+model Sale {
+  id            String     @id @default(cuid())
+  number        String     @unique
+  outletId      String
+  outlet        Outlet     @relation(fields: [outletId], references: [id])
+  cashierId     String
+  cashier       User       @relation("SaleCashier", fields: [cashierId], references: [id])
+  customerId    String?
+  customer      Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  status        SaleStatus @default(COMPLETED)
+  /// Sum of line amounts after line discounts
+  subtotalCents Int
+  /// Sum of line discounts (informational)
+  discountCents Int        @default(0)
+  taxCents      Int        @default(0)
+  totalCents    Int
+  /// Total tendered by the customer
+  paidCents     Int
+  changeCents   Int        @default(0)
+  refundedCents Int        @default(0)
+  taxRateBps    Int        @default(0)
+  taxInclusive  Boolean    @default(true)
+  notes         String?
+  createdAt     DateTime   @default(now())
+  items         SaleItem[]
+  payments      Payment[]
+  refunds       Refund[]
+
+  @@index([outletId, createdAt])
+  @@index([createdAt])
+  @@index([customerId])
+}
+
+model SaleItem {
+  id               String         @id @default(cuid())
+  saleId           String
+  sale             Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  variantId        String
+  variant          ProductVariant @relation(fields: [variantId], references: [id])
+  stockUnitId      String?
+  stockUnit        StockUnit?     @relation(fields: [stockUnitId], references: [id])
+  /// Snapshots at time of sale
+  description      String
+  sku              String
+  imei             String?
+  quantity         Int
+  unitPriceCents   Int
+  discountCents    Int            @default(0)
+  taxCents         Int            @default(0)
+  /// Amount the customer pays for this line (incl. tax)
+  totalCents       Int
+  unitCostCents    Int            @default(0)
+  refundedQuantity Int            @default(0)
+  refundedCents    Int            @default(0)
+  refundItems      RefundItem[]
+
+  @@index([saleId])
+  @@index([stockUnitId])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  saleId          String
+  sale            Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  paymentMethodId String
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  methodName      String
+  /// Amount applied to the sale (sum of payments = sale total)
+  amountCents     Int
+  /// Cash tendered (only for cash)
+  tenderedCents   Int?
+  reference       String?
+  createdAt       DateTime      @default(now())
+
+  @@index([saleId])
+}
+
+model Refund {
+  id              String        @id @default(cuid())
+  number          String        @unique
+  saleId          String
+  sale            Sale          @relation(fields: [saleId], references: [id])
+  /// Outlet where the refund happened (returned goods go here)
+  outletId        String
+  outlet          Outlet        @relation(fields: [outletId], references: [id])
+  paymentMethodId String
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  methodName      String
+  totalCents      Int
+  reason          String?
+  createdById     String
+  createdBy       User          @relation("RefundCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime      @default(now())
+  items           RefundItem[]
+
+  @@index([saleId])
+}
+
+model RefundItem {
+  id          String            @id @default(cuid())
+  refundId    String
+  refund      Refund            @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  saleItemId  String
+  saleItem    SaleItem          @relation(fields: [saleItemId], references: [id])
+  quantity    Int
+  amountCents Int
+  disposition RefundDisposition @default(RESTOCK)
+}

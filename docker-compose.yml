@@ -1,0 +1,43 @@
+# Local development:
+#   docker compose up -d db          → PostgreSQL only (run the app with `npm run dev`)
+#   docker compose --profile app up --build   → PostgreSQL + app container
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pos
+      POSTGRES_PASSWORD: pos
+      POSTGRES_DB: pos_control
+      TZ: Asia/Singapore
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pos -d pos_control"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      CONTROL_DATABASE_URL: postgresql://pos:pos@db:5432/pos_control
+      TENANT_DATABASE_URL_TEMPLATE: postgresql://pos:pos@db:5432/{db}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@example.com}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-ChangeMe123!}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Phone POS}
+      TZ: Asia/Singapore
+      # Local testing over http://localhost. Remove (or set "true") when serving over HTTPS.
+      COOKIE_SECURE: "false"
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

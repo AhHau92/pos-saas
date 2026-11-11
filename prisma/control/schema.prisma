@@ -1,0 +1,80 @@
+// ─────────────────────────────────────────────────────────────
+// Control DB (SaaS management): tenants, plans, subscriptions.
+// One shared database for the whole platform.
+// Business data lives in per-tenant databases: see ../tenant/schema.prisma
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/control"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TenantStatus {
+  PROVISIONING
+  ACTIVE
+  SUSPENDED
+  FAILED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+model Plan {
+  id            String         @id @default(cuid())
+  code          String         @unique
+  name          String
+  priceCents    Int            @default(0)
+  currency      String         @default("SGD")
+  maxOutlets    Int            @default(1)
+  maxUsers      Int            @default(3)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  subscriptions Subscription[]
+}
+
+model Tenant {
+  id             String         @id @default(cuid())
+  /// Shop code used at login, e.g. "mobilerelation"
+  slug           String         @unique
+  name           String
+  status         TenantStatus   @default(PROVISIONING)
+  /// Physical database name, e.g. "pos_t_mobilerelation"
+  dbName         String         @unique
+  ownerEmail     String
+  provisionError String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  subscriptions  Subscription[]
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  tenantId           String
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId             String
+  plan               Plan               @relation(fields: [planId], references: [id])
+  status             SubscriptionStatus @default(TRIALING)
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime
+  cancelledAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([tenantId])
+}
+
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
