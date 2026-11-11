@@ -21,20 +21,40 @@
 
 ## 快速开始（本地测试）
 
-需要：**Node.js 22**（≥ 20.19）和 **Docker Desktop**。
+**第 1 步：安装两个软件（只需一次）**
+
+- **Node.js 22**：https://nodejs.org （下载 LTS 版本安装）
+- **Docker Desktop**：https://www.docker.com/products/docker-desktop/ （Mac 选 Apple Silicon / Apple chip）。
+  安装后打开 Docker Desktop，等它显示 **Engine running**。
+
+**第 2 步：在终端（Terminal）依次执行**
 
 ```bash
 git clone https://github.com/AhHau92/pos-saas.git
 cd pos-saas
-
-cp .env.example .env          # 打开 .env，把 SESSION_SECRET 改成一串随机长字符串（≥ 32 个字符）
-docker compose up -d db       # 启动 PostgreSQL（端口 5432）
-npm install                   # 安装依赖，并自动生成 Prisma Client
-npm run setup                 # 建表 + 套餐 + 平台管理员 + demo 店铺（含示范数据）
-npm run dev                   # 打开 http://localhost:3000
+npm install
+docker compose up -d db
+npm run setup
+npm run dev
 ```
 
-> 已经有自己的 PostgreSQL？把 `.env` 里的 `CONTROL_DATABASE_URL` 和 `TENANT_DATABASE_URL_TEMPLATE` 改成你的连接（数据库用户需要 `CREATEDB` 权限）。
+**第 3 步：** 浏览器打开 http://localhost:3000
+
+说明：
+
+- `docker compose up -d db` 启动 PostgreSQL 数据库（以后开机后要用系统，先打开 Docker Desktop，再执行这一行，或 `npm run db:up`）。
+- `npm run setup` 会自动建立 `.env`（并生成随机 `SESSION_SECRET`）、建表、建立套餐和平台管理员，以及一个有示范数据的 demo 店铺。可以重复执行。
+- 已经下载过代码，要更新到最新版：在 `pos-saas` 文件夹执行 `git pull`，然后 `npm install`。
+- Mac 的终端（zsh）复制命令时，请一行一行复制上面框里的命令，不要把说明文字一起贴进去。
+
+**不想装 Docker？** 可以用 [Postgres.app](https://postgresapp.com)：安装后点 **Initialize**，然后把 `.env` 里的两行改成（`你的Mac用户名` 换成终端提示符 `@` 前面那个名字）：
+
+```bash
+CONTROL_DATABASE_URL="postgresql://你的Mac用户名@localhost:5432/pos_control"
+TENANT_DATABASE_URL_TEMPLATE="postgresql://你的Mac用户名@localhost:5432/{db}"
+```
+
+> 已经有自己的 PostgreSQL？同样修改这两行即可（数据库用户需要 `CREATEDB` 权限）。
 
 ### Demo 账号
 
@@ -82,7 +102,8 @@ npm run dev                   # 打开 http://localhost:3000
 | `npm run build` / `npm start` | 生产构建 / 启动 |
 | `npm run typecheck` | TypeScript 类型检查 |
 | `npm test` | 单元测试（价格 / 税 / 付款 / 退款 / IMEI / 状态机 / 时区 / 密码） |
-| `npm run setup` | 首次初始化（`-- --no-demo` 不建 demo 店铺） |
+| `npm run db:up` / `npm run db:down` | 启动 / 停止本地 PostgreSQL（Docker） |
+| `npm run setup` | 首次初始化（`-- --no-demo` 不建 demo 店铺）；会自动建立 `.env` |
 | `npm run tenant:create -- …` | 开通新租户 |
 | `npm run db:push:control` | 同步 Control DB 表结构 |
 | `npm run tenants:sync` | 把 `prisma/tenant/schema.prisma` 同步到**所有**租户数据库 |
@@ -99,11 +120,14 @@ npm run dev                   # 打开 http://localhost:3000
 
 ## 部署（Docker）
 
+整套（PostgreSQL + App）用 Docker 跑：
+
 ```bash
-# 整套（PostgreSQL + App）
-SESSION_SECRET="换成随机长字符串" docker compose --profile app up -d --build
+docker compose --profile app up -d --build
 docker compose exec app npm run setup -- --no-demo
 ```
+
+正式环境请设置环境变量 `SESSION_SECRET`（随机长字符串）。
 
 云端部署：任何支持 Docker 的主机（AWS / GCP / DigitalOcean / 阿里云…）。建议：
 

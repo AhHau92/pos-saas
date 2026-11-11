@@ -14,6 +14,8 @@
     "test": "tsx --test tests/*.test.ts",
     "prisma:generate": "prisma generate --config prisma.control.config.ts && prisma generate --config prisma.tenant.config.ts",
     "postinstall": "npm run prisma:generate",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose stop db",
     "db:push:control": "prisma db push --config prisma.control.config.ts",
     "tenants:sync": "tsx scripts/tenants-sync.ts",
     "tenant:create": "tsx scripts/tenant-create.ts",

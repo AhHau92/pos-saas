@@ -8,7 +8,8 @@
 import "dotenv/config";
 import { parseArgs } from "node:util";
 import { provisionTenant } from "@/modules/tenant";
-import { runCli } from "./lib/cli";
+import { requireEnv, runCli } from "./lib/cli";
+import { assertDatabaseReachable } from "./lib/env";
 
 runCli(async () => {
   const { values } = parseArgs({
@@ -30,6 +31,7 @@ runCli(async () => {
   );
   if (missing.length > 0) throw new Error(`Missing --${missing.join(", --")}`);
 
+  await assertDatabaseReachable(requireEnv("CONTROL_DATABASE_URL"));
   console.log(`Provisioning tenant "${values.slug}" … (creates a database, takes a few seconds)`);
   const result = await provisionTenant({
     slug: values.slug,

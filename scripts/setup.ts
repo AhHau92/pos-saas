@@ -2,12 +2,12 @@
  * First-time setup:  npm run setup            (with demo tenant)
  *                    npm run setup -- --no-demo
  *
+ * 0. Creates .env from .env.example (with a random SESSION_SECRET) if needed, checks PostgreSQL is running
  * 1. Creates / updates the Control DB tables (prisma db push)
  * 2. Seeds the subscription plans
  * 3. Creates (or resets the password of) the platform admin from .env
  * 4. Provisions a "demo" tenant with sample data
  */
-import "dotenv/config";
 import { parseArgs } from "node:util";
 import { getTenantDb } from "@/lib/db/tenant";
 import {
@@ -19,12 +19,16 @@ import {
 } from "@/modules/tenant";
 import { requireEnv, runCli } from "./lib/cli";
 import { seedDemoData } from "./lib/demo-data";
+import { assertDatabaseReachable, ensureEnvFile } from "./lib/env";
 
 runCli(async () => {
   const { values } = parseArgs({ options: { "no-demo": { type: "boolean", default: false } } });
-  requireEnv("CONTROL_DATABASE_URL");
+  console.log("0/4  Environment …");
+  ensureEnvFile();
+  const controlUrl = requireEnv("CONTROL_DATABASE_URL");
   requireEnv("TENANT_DATABASE_URL_TEMPLATE");
   requireEnv("SESSION_SECRET");
+  await assertDatabaseReachable(controlUrl);
 
   console.log("1/4  Control DB schema …");
   await pushControlSchema();
