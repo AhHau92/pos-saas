@@ -18,7 +18,7 @@ export function NewTenantForm({ plans }: { plans: Plan[] }) {
     ownerName: "",
     ownerEmail: "",
     ownerPassword: "",
-    outletName: "HQ",
+    outletName: "Main Store",
     currency: "SGD",
     taxRate: "9",
     taxInclusive: true,

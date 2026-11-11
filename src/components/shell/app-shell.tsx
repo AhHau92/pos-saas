@@ -24,6 +24,10 @@ type Props = {
   children: ReactNode;
 };
 
+function outletLabel(o: { code: string; name: string }): string {
+  return o.name && o.name.toUpperCase() !== o.code.toUpperCase() ? `${o.code} · ${o.name}` : o.code;
+}
+
 function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -145,14 +149,12 @@ export function AppShell({ appName, tenantName, user, outlet, outlets, nav, chil
               >
                 {outlets.map((o) => (
                   <option key={o.id} value={o.id}>
-                    {o.code} · {o.name}
+                    {outletLabel(o)}
                   </option>
                 ))}
               </select>
             ) : (
-              <span className="font-medium text-slate-900">
-                {outlet.code} · {outlet.name}
-              </span>
+              <span className="font-medium text-slate-900">{outletLabel(outlet)}</span>
             )}
           </div>
           <div className="ml-auto">

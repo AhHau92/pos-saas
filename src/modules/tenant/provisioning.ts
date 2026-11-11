@@ -72,7 +72,7 @@ export async function provisionTenant(input: unknown): Promise<{ tenantId: strin
         taxRateBps: data.taxRateBps,
         taxInclusive: data.taxInclusive,
       });
-      const outlet = await bootstrapOutlet(db, { code: "HQ", name: data.outletName || "HQ" });
+      const outlet = await bootstrapOutlet(db, { code: "HQ", name: data.outletName || "Main Store" });
       await bootstrapOwner(db, {
         name: data.ownerName,
         email: data.ownerEmail,

@@ -52,7 +52,7 @@ runCli(async () => {
         ownerName: "Demo Owner",
         ownerEmail: "owner@example.com",
         ownerPassword: "demo1234",
-        outletName: "HQ",
+        outletName: "Main Store",
       });
       demo = await resolveTenantBySlug("demo");
     }

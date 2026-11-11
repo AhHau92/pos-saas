@@ -28,7 +28,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     <div className="space-y-6">
       <PageHeader
         title={`Good day, ${ctx.user.name.split(" ")[0]}`}
-        description={allOutlets ? "Today · all outlets" : `Today · ${ctx.outlet.code} ${ctx.outlet.name}`}
+        description={
+          allOutlets
+            ? "Today · all outlets"
+            : `Today · ${ctx.outlet.name.toUpperCase() === ctx.outlet.code.toUpperCase() ? ctx.outlet.code : `${ctx.outlet.code} ${ctx.outlet.name}`}`
+        }
         actions={
           canSeeAll ? (
             <div className="flex rounded-md bg-white p-0.5 ring-1 ring-slate-200">

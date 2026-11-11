@@ -20,7 +20,7 @@ runCli(async () => {
       "owner-name": { type: "string" },
       "owner-email": { type: "string" },
       "owner-password": { type: "string" },
-      outlet: { type: "string", default: "HQ" },
+      outlet: { type: "string", default: "Main Store" },
       currency: { type: "string", default: "SGD" },
       tax: { type: "string", default: "9" },
       "tax-exclusive": { type: "boolean", default: false },
