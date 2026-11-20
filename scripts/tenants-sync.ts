@@ -9,10 +9,12 @@ import "dotenv/config";
 import { parseArgs } from "node:util";
 import { getControlDb } from "@/lib/db/control";
 import { pushTenantSchema } from "@/modules/tenant";
-import { runCli } from "./lib/cli";
+import { requireEnv, runCli } from "./lib/cli";
+import { assertDatabaseReachable } from "./lib/env";
 
 runCli(async () => {
   const { values } = parseArgs({ options: { "accept-data-loss": { type: "boolean", default: false } } });
+  await assertDatabaseReachable(requireEnv("CONTROL_DATABASE_URL"));
   const tenants = await getControlDb().tenant.findMany({
     where: { status: { in: ["ACTIVE", "SUSPENDED"] } },
     orderBy: { createdAt: "asc" },

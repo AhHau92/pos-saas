@@ -7,7 +7,8 @@ import "dotenv/config";
 import { parseArgs } from "node:util";
 import { getTenantDb } from "@/lib/db/tenant";
 import { resolveTenantBySlug } from "@/modules/tenant";
-import { runCli } from "./lib/cli";
+import { requireEnv, runCli } from "./lib/cli";
+import { assertDatabaseReachable } from "./lib/env";
 
 const CHECKS: { name: string; sql: string }[] = [
   {
@@ -76,6 +77,7 @@ const CHECKS: { name: string; sql: string }[] = [
 
 runCli(async () => {
   const { values } = parseArgs({ options: { tenant: { type: "string", default: "demo" } } });
+  await assertDatabaseReachable(requireEnv("CONTROL_DATABASE_URL"));
   const slug = values.tenant ?? "demo";
   const tenant = await resolveTenantBySlug(slug);
   if (!tenant) throw new Error(`Tenant "${slug}" not found`);
