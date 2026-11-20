@@ -136,7 +136,9 @@ export function runPrismaCli(args: string[], extraEnv: Record<string, string> = 
       },
       (error, stdout, stderr) => {
         if (error) {
-          reject(new Error(`prisma ${args.join(" ")} failed: ${(stderr || stdout || error.message).trim()}`));
+          // stdout holds Prisma's warning list (e.g. "There might be data loss …"), stderr the final error
+          const output = [stdout, stderr].map((s) => s.trim()).filter(Boolean).join("\n");
+          reject(new Error(`prisma ${args.join(" ")} failed:\n${output || error.message}`));
         } else {
           resolve(stdout);
         }
