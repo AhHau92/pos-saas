@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidEmail } from "@/lib/contact";
 import { ValidationError } from "@/lib/errors";
 
 export const idSchema = z.string().min(1).max(64);
@@ -8,6 +9,16 @@ export const quantitySchema = z.number().int().min(1).max(100_000);
 
 export const requiredText = (max = 200) => z.string().trim().min(1, "Required").max(max);
 export const optionalText = (max = 500) => z.string().trim().max(max).optional().nullable();
+
+/** Optional email: "" / null / undefined allowed, anything else must look like an email address. */
+export const optionalEmail = () =>
+  z
+    .string()
+    .trim()
+    .max(254)
+    .optional()
+    .nullable()
+    .refine((value) => !value || isValidEmail(value), "Enter a valid email address");
 
 /** "" / whitespace / undefined -> null */
 export function emptyToNull(value: string | null | undefined): string | null {

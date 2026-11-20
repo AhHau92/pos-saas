@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { TenantTx } from "@/lib/db/tenant";
 import { ConflictError, ValidationError, isPrismaError } from "@/lib/errors";
 import { assertCan, type ServiceContext } from "@/lib/service-context";
-import { emptyToNull, idSchema, optionalText, parseInput, requiredText } from "@/lib/validation";
+import { emptyToNull, idSchema, optionalEmail, optionalText, parseInput, requiredText } from "@/lib/validation";
 
 export type CustomerDTO = { id: string; name: string; phone: string | null; email: string | null };
 
@@ -36,7 +36,7 @@ export async function searchCustomers(db: TenantTx, q: string, take = 10): Promi
 const createSchema = z.object({
   name: requiredText(80),
   phone: optionalText(30),
-  email: optionalText(120),
+  email: optionalEmail(),
   notes: optionalText(500),
 });
 
@@ -63,18 +63,28 @@ export const saleCustomerSchema = z.object({
   id: idSchema.optional().nullable(),
   name: optionalText(80),
   phone: optionalText(30),
-  email: optionalText(120),
+  email: optionalEmail(),
 });
 
-/** POS: use an existing customer, or find-or-create by phone number. Returns null for walk-in sales. */
+/**
+ * POS: use an existing customer, or find-or-create by phone number. Returns null for walk-in sales.
+ * `receiptEmail` (the e-receipt address typed at the POS) is saved to the customer only when the
+ * customer has no email yet — it never overwrites one.
+ */
 export async function resolveSaleCustomer(
   tx: TenantTx,
   input: z.infer<typeof saleCustomerSchema> | null | undefined,
+  receiptEmail: string | null = null,
 ): Promise<string | null> {
   if (!input) return null;
+  const email = receiptEmail ?? emptyToNull(input.email);
+  const fillEmail = async (customer: { id: string; email: string | null }) => {
+    if (email && !customer.email) await tx.customer.update({ where: { id: customer.id }, data: { email } });
+  };
   if (input.id) {
     const existing = await tx.customer.findUnique({ where: { id: input.id } });
     if (!existing) throw new ValidationError("Customer not found");
+    await fillEmail(existing);
     return existing.id;
   }
   const phone = normalizePhone(input.phone);
@@ -84,11 +94,12 @@ export async function resolveSaleCustomer(
     const existing = await tx.customer.findUnique({ where: { phone } });
     if (existing) {
       if (name && existing.name !== name) await tx.customer.update({ where: { id: existing.id }, data: { name } });
+      await fillEmail(existing);
       return existing.id;
     }
   }
   const created = await tx.customer.create({
-    data: { name: name ?? phone ?? "Customer", phone, email: emptyToNull(input.email) },
+    data: { name: name ?? phone ?? "Customer", phone, email },
   });
   return created.id;
 }

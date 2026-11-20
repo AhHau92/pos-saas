@@ -2,11 +2,14 @@ import { z } from "zod";
 import { nextSaleNumber } from "@/lib/doc-number";
 import { ValidationError } from "@/lib/errors";
 import { assertCan, type ServiceContext } from "@/lib/service-context";
-import { centsSchema, emptyToNull, idSchema, optionalText, parseInput, quantitySchema } from "@/lib/validation";
+import { normalizeEmail } from "@/lib/contact";
+import { centsSchema, emptyToNull, idSchema, optionalEmail, optionalText, parseInput, quantitySchema } from "@/lib/validation";
 import { issueStock, type DocumentRef } from "@/modules/inventory";
 import { getBusinessProfile } from "@/modules/settings";
 import { resolveSaleCustomer, saleCustomerSchema } from "./customers.service";
 import { allocatePayments, priceLines } from "./pricing";
+import { buildReceiptHeader } from "./receipt";
+import { newReceiptToken } from "./receipt.service";
 
 const checkoutSchema = z.object({
   lines: z
@@ -31,6 +34,8 @@ const checkoutSchema = z.object({
     )
     .max(10),
   customer: saleCustomerSchema.optional().nullable(),
+  /** Optional: where to email the e-receipt (also saved to the customer if they have no email yet) */
+  receiptEmail: optionalEmail(),
   notes: optionalText(500),
 });
 
@@ -50,6 +55,7 @@ export async function checkout(ctx: ServiceContext, input: unknown): Promise<{ i
       const profile = await getBusinessProfile(tx);
       const outlet = await tx.outlet.findUnique({ where: { id: ctx.outletId } });
       if (!outlet || !outlet.isActive) throw new ValidationError("Current outlet is not active");
+      const cashier = await tx.user.findUnique({ where: { id: ctx.userId }, select: { name: true } });
 
       const variantIds = [...new Set(data.lines.map((l) => l.variantId))];
       const variants = await tx.productVariant.findMany({
@@ -95,7 +101,8 @@ export async function checkout(ctx: ServiceContext, input: unknown): Promise<{ i
               }),
             );
 
-      const customerId = await resolveSaleCustomer(tx, data.customer);
+      const receiptEmail = data.receiptEmail ? normalizeEmail(data.receiptEmail) : null;
+      const customerId = await resolveSaleCustomer(tx, data.customer, receiptEmail);
       const number = await nextSaleNumber(tx, outlet.code);
       const sale = await tx.sale.create({
         data: {
@@ -112,6 +119,12 @@ export async function checkout(ctx: ServiceContext, input: unknown): Promise<{ i
           changeCents: allocation.changeCents,
           taxRateBps: profile.taxRateBps,
           taxInclusive: profile.taxInclusive,
+          // receipt snapshot: later changes to settings / outlet / user do not change this receipt
+          currency: profile.currency,
+          taxName: profile.taxName,
+          receiptHeader: buildReceiptHeader({ profile, outlet, cashierName: cashier?.name ?? "" }),
+          receiptToken: newReceiptToken(),
+          receiptEmail,
           notes: emptyToNull(data.notes),
         },
       });

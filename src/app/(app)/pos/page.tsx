@@ -4,6 +4,7 @@ import { PosTerminal } from "@/components/pos/pos-terminal";
 import { Alert } from "@/components/ui/primitives";
 import { requireTenantContext } from "@/lib/auth/context";
 import { can } from "@/lib/auth/permissions";
+import { isMailConfigured } from "@/lib/mail";
 import { listPaymentMethods } from "@/modules/sales";
 import { getBusinessProfile } from "@/modules/settings";
 
@@ -24,6 +25,7 @@ export default async function PosPage() {
         taxInclusive={profile.taxInclusive}
         outletLabel={`${ctx.outlet.code} · ${ctx.outlet.name}`}
         paymentMethods={methods.map((m) => ({ id: m.id, name: m.name, isCash: m.isCash }))}
+        mailEnabled={isMailConfigured()}
       />
     </div>
   );

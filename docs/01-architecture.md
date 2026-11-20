@@ -66,9 +66,11 @@ src/
 | inventory | `StockLevel`、`StockUnit`、`StockUnitEvent`、`InventoryMovement`、`StockAdjustment` | products |
 | purchasing | `Supplier`、`PurchaseOrder(+Item)`、`GoodsReceipt(+Item)` | inventory、products |
 | transfers | `StockTransfer(+Item)` | inventory、products |
-| sales | `Customer`、`PaymentMethod`、`Sale`、`SaleItem`、`Payment`、`Refund`、`RefundItem` | inventory、products、settings |
+| sales | `Customer`、`PaymentMethod`、`Sale`、`SaleItem`、`Payment`、`Refund`、`RefundItem`、`ReceiptEmail` | inventory、products、settings |
 | reports | （只读） | – |
-| lib（shared kernel） | `DocumentSequence`（单号流水） | – |
+| lib（shared kernel） | `DocumentSequence`（单号流水）；`lib/mail.ts`（SMTP 寄信，环境变量设定） | – |
+
+> 顾客电子收据页 `/r/<店铺代码>/<token>` 是唯一不需要登录的业务页面：用店铺代码找到租户库，再用 128 位随机 token 找到销售单，只读。
 
 ## 3. 多租户：Database-per-Tenant
 

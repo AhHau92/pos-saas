@@ -53,6 +53,15 @@ Next.js 16 (App Router, Turbopack) · React 19 · TypeScript strict · Tailwind 
 - Dates: business timezone from `TZ` (default Asia/Singapore). Use helpers in `src/lib/time.ts`
   (`startOfDay`, `parseDateInput`, `toDateInputValue`, `formatDateTime`).
 - Document numbers via `nextDocumentNumber` / `nextSaleNumber` (`src/lib/doc-number.ts`) inside the transaction.
+- Receipts are documents: render them only from the sale's snapshot (`getReceiptData` / `ReceiptData` in
+  `src/modules/sales/receipt.ts`; header in `Sale.receiptHeader`, plus `currency`, `taxName`). Never read live settings
+  for an issued receipt. `Sale.printCount` > 0 → print "REPRINT".
+- Email: `src/lib/mail.ts` (nodemailer, SMTP from `SMTP_*` env). Never commit or log SMTP passwords. Public e-receipt page
+  `/r/<shop>/<token>` is the only business page without login — keep it read-only and mask phone numbers.
+- Transfers can be received in parts (`receivedQuantity`); items that never arrive are settled by a manager
+  (`resolveTransfer`: LOST → write-off, RETURN → back to the sender). `IN_TRANSIT` units are changed only by the
+  transfers module, never by adjustments.
+- IMEI input: `parseIdentifierInput` (newline / comma / space separated). Grades come from `UNIT_GRADES` only.
 - Prisma 7: import the client and types from `@/generated/tenant/client`, enums from `@/generated/tenant/enums`.
   Clients use the `@prisma/adapter-pg` driver adapter. Generated code is in `src/generated/` (git-ignored).
 - Next.js 16: `params` and `searchParams` are Promises (`await` them); type page `searchParams` as `SearchParams`

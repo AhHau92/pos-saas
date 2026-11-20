@@ -1,6 +1,6 @@
 import type { TenantTx } from "@/lib/db/tenant";
 import { NotFoundError } from "@/lib/errors";
-import { variantLabel, type ProductTypeValue } from "@/modules/products";
+import { variantLabel, type ConditionValue, type ProductTypeValue } from "@/modules/products";
 
 export type PurchaseOrderStatusValue = "DRAFT" | "ORDERED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
 
@@ -74,6 +74,7 @@ export type PurchaseOrderDetail = {
     sku: string;
     label: string;
     productType: ProductTypeValue;
+    condition: ConditionValue;
     quantity: number;
     receivedQuantity: number;
     unitCostCents: number;
@@ -127,6 +128,7 @@ export async function getPurchaseOrderDetail(db: TenantTx, id: string): Promise<
       sku: i.variant.sku,
       label: variantLabel(i.variant.product.name, i.variant),
       productType: i.variant.product.type,
+      condition: i.variant.condition,
       quantity: i.quantity,
       receivedQuantity: i.receivedQuantity,
       unitCostCents: i.unitCostCents,

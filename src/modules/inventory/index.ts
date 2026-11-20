@@ -4,6 +4,8 @@ export {
   issueStock,
   returnStock,
   receiveTransferredStock,
+  returnTransferredStock,
+  writeOffTransitStock,
   changeUnitStatus,
   type DocumentRef,
   type IncomingUnit,
@@ -38,7 +40,17 @@ export {
   type AdjustmentListItem,
 } from "./inventory.queries";
 // Pure helpers
-export { normalizeIdentifier, isValidImei, parseUnitLine, parseUnitLines, type ParsedUnit } from "./imei";
+export {
+  normalizeIdentifier,
+  isValidImei,
+  identifierKey,
+  normalizeGrade,
+  parseBatteryHealth,
+  parseIdentifierInput,
+  UNIT_GRADES,
+  type ParsedIdentifier,
+  type UnitGrade,
+} from "./imei";
 export {
   canTransition,
   UNIT_STATUSES,

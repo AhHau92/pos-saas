@@ -10,11 +10,9 @@ import { requireTenantContext } from "@/lib/auth/context";
 import { can } from "@/lib/auth/permissions";
 import { firstParam, type SearchParams } from "@/lib/page";
 import { formatDateTime } from "@/lib/time";
-import { listTransfers, type TransferStatusValue } from "@/modules/transfers";
+import { isOpenTransfer, listTransfers, TRANSFER_STATUS_LABELS, TRANSFER_STATUSES } from "@/modules/transfers";
 
 export const metadata: Metadata = { title: "Stock transfers" };
-
-const STATUSES: TransferStatusValue[] = ["DRAFT", "IN_TRANSIT", "RECEIVED", "CANCELLED"];
 
 export default async function TransfersPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await requireTenantContext();
@@ -23,7 +21,7 @@ export default async function TransfersPage({ searchParams }: { searchParams: Se
   const directionParam = firstParam(sp.direction);
   const direction = directionParam === "in" || directionParam === "out" ? directionParam : "all";
   const statusParam = firstParam(sp.status);
-  const status = STATUSES.find((s) => s === statusParam);
+  const status = TRANSFER_STATUSES.find((s) => s === statusParam);
   const scopeAll = can(ctx.role, "outlets.switch") && firstParam(sp.scope) === "all";
   const transfers = await listTransfers(ctx.db, { outletId: scopeAll ? undefined : ctx.outletId, direction, status });
 
@@ -51,9 +49,9 @@ export default async function TransfersPage({ searchParams }: { searchParams: Se
         <FilterField label="Status">
           <select name="status" defaultValue={status ?? ""} className={selectClass}>
             <option value="">All</option>
-            {STATUSES.map((s) => (
+            {TRANSFER_STATUSES.map((s) => (
               <option key={s} value={s}>
-                {s.replace("_", " ").toLowerCase()}
+                {TRANSFER_STATUS_LABELS[s]}
               </option>
             ))}
           </select>
@@ -93,14 +91,22 @@ export default async function TransfersPage({ searchParams }: { searchParams: Se
                   </Td>
                   <Td>
                     {t.fromOutlet} → {t.toOutlet}
-                    {t.toOutletId === ctx.outletId && t.status === "IN_TRANSIT" ? (
+                    {t.toOutletId === ctx.outletId && isOpenTransfer(t.status) ? (
                       <span className="ml-2 text-xs font-medium text-sky-700">incoming</span>
                     ) : null}
                   </Td>
                   <Td>
                     <StatusBadge status={t.status} />
                   </Td>
-                  <Td className="text-right tabular-nums">{t.quantity}</Td>
+                  <Td className="text-right tabular-nums">
+                    {t.status === "PARTIALLY_RECEIVED" ? (
+                      <span title="received / sent">
+                        {t.receivedQuantity} / {t.quantity}
+                      </span>
+                    ) : (
+                      t.quantity
+                    )}
+                  </Td>
                   <Td className="text-xs">{formatDateTime(t.createdAt)}</Td>
                   <Td className="text-xs">{t.dispatchedAt ? formatDateTime(t.dispatchedAt) : "—"}</Td>
                   <Td className="text-xs">{t.receivedAt ? formatDateTime(t.receivedAt) : "—"}</Td>

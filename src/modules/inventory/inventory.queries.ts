@@ -58,14 +58,19 @@ export async function getStockMatrix(
     take: options.take ?? 500,
   });
 
-  const transit = await db.stockTransferItem.groupBy({
-    by: ["variantId"],
-    where: { transfer: { status: "IN_TRANSIT" }, variantId: { in: variants.map((v) => v.id) } },
-    _sum: { quantity: true },
+  // still on the road = sent − received − lost − returned, on transfers that are not finished
+  const transitItems = await db.stockTransferItem.findMany({
+    where: {
+      transfer: { status: { in: ["IN_TRANSIT", "PARTIALLY_RECEIVED"] } },
+      variantId: { in: variants.map((v) => v.id) },
+    },
+    select: { variantId: true, quantity: true, receivedQuantity: true, lostQuantity: true, returnedQuantity: true },
   });
-  const transitByVariant = new Map<string, number>(
-    transit.map((t: { variantId: string; _sum: { quantity: number | null } }) => [t.variantId, t._sum.quantity ?? 0]),
-  );
+  const transitByVariant = new Map<string, number>();
+  for (const t of transitItems) {
+    const open = t.quantity - t.receivedQuantity - t.lostQuantity - t.returnedQuantity;
+    if (open > 0) transitByVariant.set(t.variantId, (transitByVariant.get(t.variantId) ?? 0) + open);
+  }
 
   let rows: StockMatrixRow[] = variants.map((v) => {
     const byOutlet: Record<string, number> = {};

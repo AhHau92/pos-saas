@@ -41,6 +41,24 @@ const CHECKS: { name: string; sql: string }[] = [
     sql: `SELECT "outletId", "variantId", quantity FROM "StockLevel" WHERE quantity < 0`,
   },
   {
+    name: "Transfers: received + lost + returned never exceeds what was sent",
+    sql: `SELECT t.number, i.id AS "itemId", i.quantity, i."receivedQuantity", i."lostQuantity", i."returnedQuantity"
+          FROM "StockTransferItem" i JOIN "StockTransfer" t ON t.id = i."transferId"
+          WHERE i."receivedQuantity" + i."lostQuantity" + i."returnedQuantity" > i.quantity
+             OR i."receivedQuantity" < 0 OR i."lostQuantity" < 0 OR i."returnedQuantity" < 0`,
+  },
+  {
+    name: "IN_TRANSIT units are on an open transfer and not yet received / settled",
+    sql: `SELECT u.id, u.imei, u."serialNumber"
+          FROM "StockUnit" u
+          WHERE u.status = 'IN_TRANSIT'
+            AND NOT EXISTS (
+              SELECT 1 FROM "StockTransferItem" i JOIN "StockTransfer" t ON t.id = i."transferId"
+              WHERE i."stockUnitId" = u.id
+                AND t.status IN ('IN_TRANSIT', 'PARTIALLY_RECEIVED')
+                AND i.quantity - i."receivedQuantity" - i."lostQuantity" - i."returnedQuantity" > 0)`,
+  },
+  {
     name: "Sales: items add up to the sale total",
     sql: `SELECT s.number, s."totalCents", SUM(i."totalCents")::int AS items
           FROM "Sale" s JOIN "SaleItem" i ON i."saleId" = s.id

@@ -51,6 +51,8 @@ enum MovementType {
   SALE_RETURN
   TRANSFER_OUT
   TRANSFER_IN
+  /// Goods that never arrived and were sent back to the sending outlet
+  TRANSFER_RETURN
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
 }
@@ -81,10 +83,16 @@ enum PurchaseOrderStatus {
   CANCELLED
 }
 
+/// See docs/04-business-flows.md §4
 enum TransferStatus {
   DRAFT
   IN_TRANSIT
+  /// Some items received, the rest still in transit
+  PARTIALLY_RECEIVED
+  /// Everything received
   RECEIVED
+  /// Finished with differences (some items lost or returned to the sender)
+  CLOSED
   CANCELLED
 }
 
@@ -97,6 +105,11 @@ enum SaleStatus {
 enum RefundDisposition {
   RESTOCK
   DEFECTIVE
+}
+
+enum ReceiptEmailStatus {
+  SENT
+  FAILED
 }
 
 // ───────────── Organisation & settings ─────────────
@@ -119,6 +132,8 @@ model BusinessProfile {
   /// true = prices already include tax (Singapore retail default)
   taxInclusive      Boolean  @default(true)
   receiptFooter     String?
+  /// Country calling code for customer phone numbers without one (WhatsApp links), e.g. "65"
+  phoneCountryCode  String   @default("65")
   updatedAt         DateTime @updatedAt
 }
 
@@ -167,9 +182,11 @@ model User {
   transfersCreated    StockTransfer[]     @relation("TransferCreatedBy")
   transfersDispatched StockTransfer[]     @relation("TransferDispatchedBy")
   transfersReceived   StockTransfer[]     @relation("TransferReceivedBy")
+  transfersResolved   StockTransfer[]     @relation("TransferResolvedBy")
   movements           InventoryMovement[]
   unitEvents          StockUnitEvent[]
   adjustments         StockAdjustment[]
+  receiptEmails       ReceiptEmail[]
 }
 
 /// Running counters for document numbers (PO-2026-00001 ...)
@@ -461,9 +478,15 @@ model StockTransfer {
   dispatchedById String?
   dispatchedBy   User?               @relation("TransferDispatchedBy", fields: [dispatchedById], references: [id])
   dispatchedAt   DateTime?
+  /// Last receipt at the destination (a transfer can be received in several parts)
   receivedById   String?
   receivedBy     User?               @relation("TransferReceivedBy", fields: [receivedById], references: [id])
   receivedAt     DateTime?
+  /// Last time a manager settled missing items (lost / returned to sender)
+  resolvedById   String?
+  resolvedBy     User?               @relation("TransferResolvedBy", fields: [resolvedById], references: [id])
+  resolvedAt     DateTime?
+  resolutionNote String?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   items          StockTransferItem[]
@@ -474,16 +497,23 @@ model StockTransfer {
 }
 
 /// Serialized items: one row per unit (stockUnitId set, quantity 1). Others: one row per SKU.
+/// Still in transit = quantity - receivedQuantity - lostQuantity - returnedQuantity
 model StockTransferItem {
-  id            String         @id @default(cuid())
-  transferId    String
-  transfer      StockTransfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
-  variantId     String
-  variant       ProductVariant @relation(fields: [variantId], references: [id])
-  stockUnitId   String?
-  stockUnit     StockUnit?     @relation(fields: [stockUnitId], references: [id])
-  quantity      Int
-  unitCostCents Int            @default(0)
+  id               String         @id @default(cuid())
+  transferId       String
+  transfer         StockTransfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  variantId        String
+  variant          ProductVariant @relation(fields: [variantId], references: [id])
+  stockUnitId      String?
+  stockUnit        StockUnit?     @relation(fields: [stockUnitId], references: [id])
+  quantity         Int
+  unitCostCents    Int            @default(0)
+  /// Arrived at the destination
+  receivedQuantity Int            @default(0)
+  /// Confirmed lost in transit (written off)
+  lostQuantity     Int            @default(0)
+  /// Never left / sent back: returned to the sending outlet's stock
+  returnedQuantity Int            @default(0)
 
   @@index([transferId])
 }
@@ -535,11 +565,23 @@ model Sale {
   refundedCents Int        @default(0)
   taxRateBps    Int        @default(0)
   taxInclusive  Boolean    @default(true)
+  /// Snapshots taken at checkout — receipts never change when settings change later
+  currency      String     @default("SGD")
+  taxName       String     @default("GST")
+  /// Business, outlet and cashier details printed on the receipt (see src/modules/sales/receipt.ts)
+  receiptHeader Json?
+  /// Random token for the customer's e-receipt link: /r/<shop code>/<token>
+  receiptToken  String?    @unique
+  /// Last address the e-receipt was sent to
+  receiptEmail  String?
+  /// Times the receipt was printed: the first print is the original, later prints say REPRINT
+  printCount    Int        @default(0)
   notes         String?
   createdAt     DateTime   @default(now())
   items         SaleItem[]
   payments      Payment[]
   refunds       Refund[]
+  receiptEmails ReceiptEmail[]
 
   @@index([outletId, createdAt])
   @@index([createdAt])
@@ -620,4 +662,20 @@ model RefundItem {
   quantity    Int
   amountCents Int
   disposition RefundDisposition @default(RESTOCK)
+}
+
+/// E-receipt emails (one row per attempt, for the "sent / failed" history on the sale page)
+model ReceiptEmail {
+  id        String             @id @default(cuid())
+  saleId    String
+  sale      Sale               @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  toEmail   String
+  status    ReceiptEmailStatus
+  error     String?
+  messageId String?
+  sentById  String?
+  sentBy    User?              @relation(fields: [sentById], references: [id], onDelete: SetNull)
+  createdAt DateTime           @default(now())
+
+  @@index([saleId, createdAt])
 }

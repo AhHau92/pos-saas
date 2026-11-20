@@ -5,7 +5,14 @@ import { nextDocumentNumber } from "@/lib/doc-number";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { assertCan, type ServiceContext } from "@/lib/service-context";
 import { emptyToNull, idSchema, optionalText, parseInput, quantitySchema } from "@/lib/validation";
-import { issueStock, receiveTransferredStock, type DocumentRef } from "@/modules/inventory";
+import {
+  issueStock,
+  receiveTransferredStock,
+  returnTransferredStock,
+  writeOffTransitStock,
+  type DocumentRef,
+} from "@/modules/inventory";
+import { isOpenTransfer, outstandingQuantity, transferStatusAfter, type TransferStatusValue } from "./transfer-status";
 
 const createSchema = z.object({
   fromOutletId: idSchema.optional(),
@@ -119,35 +126,169 @@ export async function dispatchTransfer(ctx: ServiceContext, id: string): Promise
   await ctx.db.$transaction((tx) => dispatchInTransaction(tx, id, ctx.userId), { timeout: 30000, maxWait: 10000 });
 }
 
-/** Destination confirms receipt. Cashiers can only receive into their own outlet. */
-export async function receiveTransfer(ctx: ServiceContext, id: string): Promise<void> {
+const receiveSchema = z.object({
+  /** Receive everything that is still in transit */
+  all: z.boolean().optional(),
+  /** What arrived: serialized items quantity 1 (one row per IMEI), accessories any quantity */
+  lines: z.array(z.object({ itemId: idSchema, quantity: quantitySchema })).max(1000).optional(),
+});
+
+const resolveSchema = z.object({
+  lines: z
+    .array(z.object({ itemId: idSchema, quantity: quantitySchema, action: z.enum(["LOST", "RETURN"]) }))
+    .min(1, "Choose what happened to at least one item")
+    .max(1000),
+  note: optionalText(500),
+});
+
+type TransferItemRow = {
+  id: string;
+  variantId: string;
+  stockUnitId: string | null;
+  quantity: number;
+  unitCostCents: number;
+  receivedQuantity: number;
+  lostQuantity: number;
+  returnedQuantity: number;
+};
+
+/** Locks the transfer row so receipts / resolutions of the same transfer run one after another. */
+async function lockOpenTransfer(tx: TenantTx, id: string) {
+  await tx.$queryRaw`SELECT id FROM "StockTransfer" WHERE id = ${id} FOR UPDATE`;
+  const transfer = await tx.stockTransfer.findUnique({ where: { id }, include: { items: true } });
+  if (!transfer) throw new NotFoundError("Transfer not found");
+  if (!isOpenTransfer(transfer.status)) {
+    throw new ConflictError(`This transfer is ${transfer.status.replace("_", " ").toLowerCase()} — nothing is in transit`);
+  }
+  return transfer;
+}
+
+/** Validates quantities against what is still in transit. Several lines may share an item (e.g. 2 lost + 1 returned). */
+function checkAgainstOutstanding(items: TransferItemRow[], lines: { itemId: string; quantity: number }[]): Map<string, TransferItemRow> {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const requested = new Map<string, number>();
+  for (const line of lines) {
+    const item = byId.get(line.itemId);
+    if (!item) throw new ValidationError("Item does not belong to this transfer");
+    if (item.stockUnitId && line.quantity !== 1) throw new ValidationError("IMEI items are handled one unit at a time");
+    requested.set(item.id, (requested.get(item.id) ?? 0) + line.quantity);
+  }
+  for (const [itemId, quantity] of requested) {
+    const item = byId.get(itemId)!;
+    const open = outstandingQuantity(item);
+    if (quantity > open) {
+      throw new ConflictError(
+        open === 0 ? "An item was already received or settled — refresh the page" : `Only ${open} of an item is still in transit (got ${quantity})`,
+      );
+    }
+  }
+  return byId;
+}
+
+async function updateStatus(tx: TenantTx, transferId: string): Promise<TransferStatusValue> {
+  const items = await tx.stockTransferItem.findMany({ where: { transferId } });
+  return transferStatusAfter(items);
+}
+
+/**
+ * Destination confirms what arrived — all of it, or part of it. Whatever is not received stays
+ * in transit (it can be received later, or a manager settles it with resolveTransfer).
+ * Cashiers can only receive into their own outlet.
+ */
+export async function receiveTransfer(
+  ctx: ServiceContext,
+  id: string,
+  input: unknown = { all: true },
+): Promise<{ status: TransferStatusValue; receivedQuantity: number }> {
   assertCan(ctx, "transfers.receive");
-  await ctx.db.$transaction(
+  const data = parseInput(receiveSchema, input ?? { all: true });
+  return ctx.db.$transaction(
     async (tx) => {
-      const transfer = await tx.stockTransfer.findUnique({ where: { id }, include: { items: true } });
-      if (!transfer) throw new NotFoundError("Transfer not found");
+      const transfer = await lockOpenTransfer(tx, id);
       if (!can(ctx.role, "outlets.switch") && transfer.toOutletId !== ctx.outletId) {
         throw new ForbiddenError("Only the receiving outlet can confirm this transfer");
       }
-      const claimed = await tx.stockTransfer.updateMany({
-        where: { id, status: "IN_TRANSIT" },
-        data: { status: "RECEIVED", receivedById: ctx.userId, receivedAt: new Date() },
-      });
-      if (claimed.count !== 1) throw new ConflictError("Only transfers in transit can be received");
+      const lines = data.all
+        ? transfer.items.filter((i) => outstandingQuantity(i) > 0).map((i) => ({ itemId: i.id, quantity: outstandingQuantity(i) }))
+        : (data.lines ?? []);
+      if (lines.length === 0) throw new ValidationError("Scan or tick at least one item that arrived");
+      const byId = checkAgainstOutstanding(transfer.items, lines);
+
       const ref: DocumentRef = { refType: "TRANSFER", refId: transfer.id, refNo: transfer.number };
-      for (const item of transfer.items) {
+      let receivedQuantity = 0;
+      for (const line of lines) {
+        const item = byId.get(line.itemId)!;
         await receiveTransferredStock(tx, {
           toOutletId: transfer.toOutletId,
           variantId: item.variantId,
-          quantity: item.quantity,
+          quantity: line.quantity,
           stockUnitId: item.stockUnitId,
           unitCostCents: item.unitCostCents,
           ref,
           userId: ctx.userId,
         });
+        await tx.stockTransferItem.update({ where: { id: item.id }, data: { receivedQuantity: { increment: line.quantity } } });
+        receivedQuantity += line.quantity;
       }
+      const status = await updateStatus(tx, transfer.id);
+      await tx.stockTransfer.update({
+        where: { id: transfer.id },
+        data: { status, receivedById: ctx.userId, receivedAt: new Date() },
+      });
+      return { status, receivedQuantity };
     },
-    { timeout: 30000, maxWait: 10000 },
+    { timeout: 60000, maxWait: 10000 },
+  );
+}
+
+/**
+ * Manager settles items that did not arrive:
+ *   LOST   → written off (IMEI unit becomes WRITTEN_OFF; quantity recorded on the transfer)
+ *   RETURN → back into the sending outlet's stock (never left, or came back)
+ */
+export async function resolveTransfer(ctx: ServiceContext, id: string, input: unknown): Promise<{ status: TransferStatusValue }> {
+  assertCan(ctx, "transfers.manage");
+  const data = parseInput(resolveSchema, input);
+  return ctx.db.$transaction(
+    async (tx) => {
+      const transfer = await lockOpenTransfer(tx, id);
+      const byId = checkAgainstOutstanding(transfer.items, data.lines);
+      const note = emptyToNull(data.note);
+      const ref: DocumentRef = { refType: "TRANSFER", refId: transfer.id, refNo: transfer.number };
+
+      for (const line of data.lines) {
+        const item = byId.get(line.itemId)!;
+        if (line.action === "LOST") {
+          await writeOffTransitStock(tx, {
+            variantId: item.variantId,
+            stockUnitId: item.stockUnitId,
+            ref,
+            userId: ctx.userId,
+            note: note ? `Lost in transit: ${note}` : "Lost in transit",
+          });
+          await tx.stockTransferItem.update({ where: { id: item.id }, data: { lostQuantity: { increment: line.quantity } } });
+        } else {
+          await returnTransferredStock(tx, {
+            fromOutletId: transfer.fromOutletId,
+            variantId: item.variantId,
+            quantity: line.quantity,
+            stockUnitId: item.stockUnitId,
+            unitCostCents: item.unitCostCents,
+            ref,
+            userId: ctx.userId,
+            note: note ? `Returned to sender: ${note}` : null,
+          });
+          await tx.stockTransferItem.update({ where: { id: item.id }, data: { returnedQuantity: { increment: line.quantity } } });
+        }
+      }
+      const status = await updateStatus(tx, transfer.id);
+      await tx.stockTransfer.update({
+        where: { id: transfer.id },
+        data: { status, resolvedById: ctx.userId, resolvedAt: new Date(), resolutionNote: note },
+      });
+      return { status };
+    },
+    { timeout: 60000, maxWait: 10000 },
   );
 }
 

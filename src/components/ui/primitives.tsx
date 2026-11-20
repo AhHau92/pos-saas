@@ -78,6 +78,8 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   PARTIALLY_RECEIVED: "amber",
   RECEIVED: "green",
   CANCELLED: "red",
+  // transfers
+  CLOSED: "purple",
   // sales
   COMPLETED: "green",
   PARTIALLY_REFUNDED: "amber",

@@ -12,6 +12,7 @@ import { bootstrapOutlet } from "@/modules/outlets";
 import { bootstrapOwner } from "@/modules/users";
 import { seedDefaultPaymentMethods } from "@/modules/sales";
 import { invalidateTenantCache, normalizeSlug } from "./tenant.service";
+import { runTenantDataFixes } from "./data-fixes";
 
 const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,30})[a-z0-9]$/;
 const RESERVED_SLUGS = new Set(["admin", "platform", "api", "www", "control", "postgres", "template0", "template1"]);
@@ -144,11 +145,12 @@ export function runPrismaCli(args: string[], extraEnv: Record<string, string> = 
   });
 }
 
-/** Creates / updates all tables of one tenant database from prisma/tenant/schema.prisma. */
+/** Creates / updates all tables of one tenant database from prisma/tenant/schema.prisma, then runs the data fixes. */
 export async function pushTenantSchema(dbName: string, options: { acceptDataLoss?: boolean } = {}): Promise<void> {
   const args = ["db", "push", "--config", "prisma.tenant.config.ts"];
   if (options.acceptDataLoss) args.push("--accept-data-loss");
   await runPrismaCli(args, { TENANT_DATABASE_URL: tenantDatabaseUrl(dbName) });
+  await runTenantDataFixes(dbName);
 }
 
 export async function pushControlSchema(options: { acceptDataLoss?: boolean } = {}): Promise<void> {

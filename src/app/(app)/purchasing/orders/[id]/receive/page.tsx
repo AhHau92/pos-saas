@@ -38,6 +38,7 @@ export default async function ReceivePage({ params }: { params: Promise<{ id: st
             label: i.label,
             sku: i.sku,
             serialized: i.productType === "SERIALIZED",
+            used: i.condition !== "NEW",
             remaining: i.quantity - i.receivedQuantity,
             unitCostCents: i.unitCostCents,
           }))}

@@ -4,12 +4,13 @@ import { NoAccess } from "@/components/no-access";
 import { buttonClass } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icons";
 import { Card, CardHeader, DetailList, PageHeader, StatusBadge, Table, Td, Th } from "@/components/ui/primitives";
+import { receiptLinkBase } from "@/lib/app-url";
 import { requireTenantContext } from "@/lib/auth/context";
 import { can } from "@/lib/auth/permissions";
 import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/time";
-import { getSaleDetail, listPaymentMethods } from "@/modules/sales";
-import { getBusinessProfile } from "@/modules/settings";
+import { getReceiptShare, getSaleDetail, listPaymentMethods } from "@/modules/sales";
+import { ReceiptPanel } from "./receipt-panel";
 import { RefundPanel } from "./refund-panel";
 
 export const metadata: Metadata = { title: "Sale" };
@@ -18,12 +19,13 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
   const ctx = await requireTenantContext();
   if (!can(ctx.role, "sales.view")) return <NoAccess />;
   const { id } = await params;
-  const [profile, sale, methods] = await Promise.all([
-    getBusinessProfile(ctx.db),
+  const [sale, methods, share] = await Promise.all([
     getSaleDetail(ctx.db, id),
     listPaymentMethods(ctx.db),
+    getReceiptShare(ctx, id, await receiptLinkBase(ctx.tenant.slug)),
   ]);
-  const money = (c: number) => formatMoney(c, profile.currency);
+  // currency and tax name come from the sale's snapshot, not from today's settings
+  const money = (c: number) => formatMoney(c, sale.currency);
   const canRefund = can(ctx.role, "sales.refund") && sale.status !== "REFUNDED";
   const showCost = can(ctx.role, "reports.view");
 
@@ -43,7 +45,7 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
         description={`${formatDateTime(sale.createdAt)} · ${sale.outlet.code} · cashier ${sale.cashier}`}
         actions={
           <a href={`/receipt/${sale.id}?print=1`} target="_blank" rel="noreferrer" className={buttonClass("secondary")}>
-            <Icon name="printer" className="h-4 w-4" /> Print receipt
+            <Icon name="printer" className="h-4 w-4" /> {sale.printCount > 0 ? "Reprint receipt" : "Print receipt"}
           </a>
         }
       />
@@ -51,7 +53,10 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
       <Card>
         <DetailList
           items={[
-            { label: "Customer", value: sale.customer ? `${sale.customer.name}${sale.customer.phone ? ` · ${sale.customer.phone}` : ""}` : "Walk-in" },
+            {
+              label: "Customer",
+              value: sale.customer ? `${sale.customer.name}${sale.customer.phone ? ` · ${sale.customer.phone}` : ""}` : "Walk-in",
+            },
             { label: "Total", value: money(sale.totalCents) },
             { label: "Refunded", value: sale.refundedCents > 0 ? money(sale.refundedCents) : "—" },
             { label: "Paid", value: money(sale.paidCents) },
@@ -111,7 +116,7 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
             <div className="flex justify-between text-slate-600">
               <dt>
                 {sale.taxInclusive ? "Incl. " : ""}
-                {profile.taxName} {sale.taxRateBps / 100}%
+                {sale.taxName} {sale.taxRateBps / 100}%
               </dt>
               <dd className="tabular-nums">{money(sale.taxCents)}</dd>
             </div>
@@ -171,10 +176,21 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
         </Card>
       </div>
 
+      <ReceiptPanel
+        saleId={sale.id}
+        printCount={sale.printCount}
+        defaultEmail={sale.receiptEmail ?? sale.customer?.email ?? ""}
+        emailConfigured={share.emailConfigured}
+        whatsappUrl={share.whatsappUrl}
+        whatsappTo={share.whatsappTo}
+        link={share.link}
+        history={sale.receiptEmails}
+      />
+
       {canRefund ? (
         <RefundPanel
           saleId={sale.id}
-          currency={profile.currency}
+          currency={sale.currency}
           items={sale.items.map((i) => ({
             id: i.id,
             description: i.description,

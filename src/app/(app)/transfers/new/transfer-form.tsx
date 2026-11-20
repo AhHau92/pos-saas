@@ -27,17 +27,22 @@ export function TransferForm({
   fromOutletId,
   destinations,
   currency,
+  initial,
 }: {
   fromOutletId: string;
   destinations: { id: string; code: string; name: string }[];
   currency: string;
+  /** Pre-filled transfer (e.g. "send items back") */
+  initial?: { toOutletId: string; notes: string; units: UnitInfo[]; lines: QtyLine[] };
 }) {
   const router = useRouter();
-  const [toOutletId, setToOutletId] = useState(destinations[0]?.id ?? "");
-  const [notes, setNotes] = useState("");
+  const [toOutletId, setToOutletId] = useState(
+    initial && destinations.some((d) => d.id === initial.toOutletId) ? initial.toOutletId : (destinations[0]?.id ?? ""),
+  );
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [scan, setScan] = useState("");
-  const [units, setUnits] = useState<UnitInfo[]>([]);
-  const [lines, setLines] = useState<QtyLine[]>([]);
+  const [units, setUnits] = useState<UnitInfo[]>(initial?.units ?? []);
+  const [lines, setLines] = useState<QtyLine[]>(initial?.lines ?? []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"draft" | "dispatch" | null>(null);
 

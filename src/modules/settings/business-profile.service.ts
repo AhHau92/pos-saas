@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { TenantDb, TenantTx } from "@/lib/db/tenant";
 import { assertCan, type ServiceContext } from "@/lib/service-context";
-import { emptyToNull, optionalText, parseInput, requiredText } from "@/lib/validation";
+import { emptyToNull, optionalEmail, optionalText, parseInput, requiredText } from "@/lib/validation";
 
 export type BusinessProfileDTO = {
   name: string;
@@ -16,6 +16,8 @@ export type BusinessProfileDTO = {
   taxRateBps: number;
   taxInclusive: boolean;
   receiptFooter: string | null;
+  /** Calling code added to local customer numbers for WhatsApp links, e.g. "65" */
+  phoneCountryCode: string;
 };
 
 type ProfileRow = {
@@ -30,6 +32,7 @@ type ProfileRow = {
   taxRateBps: number;
   taxInclusive: boolean;
   receiptFooter: string | null;
+  phoneCountryCode: string;
 };
 
 function toDto(row: ProfileRow): BusinessProfileDTO {
@@ -45,6 +48,7 @@ function toDto(row: ProfileRow): BusinessProfileDTO {
     taxRateBps: row.taxRateBps,
     taxInclusive: row.taxInclusive,
     receiptFooter: row.receiptFooter,
+    phoneCountryCode: row.phoneCountryCode,
   };
 }
 
@@ -65,12 +69,18 @@ const businessProfileSchema = z.object({
   taxRegistrationNo: optionalText(40),
   address: optionalText(300),
   phone: optionalText(40),
-  email: optionalText(120),
+  email: optionalEmail(),
   currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Use a 3-letter currency code, e.g. SGD"),
   taxName: requiredText(20),
   taxRateBps: z.number().int().min(0).max(5000),
   taxInclusive: z.boolean(),
   receiptFooter: optionalText(500),
+  phoneCountryCode: z
+    .string()
+    .trim()
+    .regex(/^\+?\d{1,4}$/, "Use the country calling code, e.g. 65")
+    .transform((v) => v.replace("+", ""))
+    .optional(),
 });
 
 export async function updateBusinessProfile(ctx: ServiceContext, input: unknown): Promise<BusinessProfileDTO> {
@@ -88,6 +98,7 @@ export async function updateBusinessProfile(ctx: ServiceContext, input: unknown)
     taxRateBps: data.taxRateBps,
     taxInclusive: data.taxInclusive,
     receiptFooter: emptyToNull(data.receiptFooter),
+    ...(data.phoneCountryCode ? { phoneCountryCode: data.phoneCountryCode } : {}),
   };
   const row = await ctx.db.businessProfile.upsert({
     where: { id: 1 },

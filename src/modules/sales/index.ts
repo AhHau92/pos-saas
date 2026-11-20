@@ -26,3 +26,24 @@ export {
   type PricedLine,
   type SaleTotals,
 } from "./pricing";
+// Receipts (printed, e-receipt page, email, WhatsApp)
+export {
+  buildReceiptHeader,
+  parseReceiptHeader,
+  receiptTitle,
+  receiptText,
+  formatTaxRate,
+  maskPhone,
+  maskEmail,
+  type ReceiptHeader,
+  type ReceiptData,
+} from "./receipt";
+export { getReceiptData, getReceiptDataByToken } from "./receipt.queries";
+export {
+  ensureReceiptToken,
+  recordReceiptPrint,
+  getReceiptShare,
+  emailReceipt,
+  type ReceiptShare,
+} from "./receipt.service";
+export { receiptEmailHtml, receiptEmailText, receiptEmailSubject } from "./receipt-email";

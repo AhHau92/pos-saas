@@ -13,9 +13,10 @@
 
 - **① 商品**：品牌 / 分类 / 型号，SKU = 颜色 × 容量 × RAM × 成色（新机 / 二手 / 翻新）；“颜色 × 容量”一键生成多个 SKU
 - **② 库存**：每台手机按 IMEI / 序列号追踪（完整生命周期）、各门店库存矩阵、库存流水、低库存提醒、库存调整（期初入库 / 盘点 / 报损 / 故障）
-- **③ 采购**：供应商、采购单、分批收货（扫描 IMEI，二手机可带成色和电池健康）、移动加权平均成本
-- **④ 调货**：草稿 → 发出（在途）→ 目的门店确认收货
-- **⑤ POS 收银**：扫 IMEI / 条码 / 搜索、改价与折扣、拆单付款（Cash / NETS / Card / PayNow…）、找零、顾客资料、80mm 热敏收据、部分 / 全额退款
+- **③ 采购**：供应商、采购单、分批收货（扫描或一次贴上多个 IMEI，确认前有预览清单；二手机逐台填成色和电池健康）、移动加权平均成本
+- **④ 调货**：草稿 → 发出（在途）→ 目的门店逐台扫描收货（可以分几次收）；没到的货由经理处理（遗失报损 / 退回发出门店）；寄错或坏了可一键开反方向调货单
+- **⑤ POS 收银**：扫 IMEI / 条码 / 搜索、改价与折扣、拆单付款（Cash / NETS / Card / PayNow…）、找零、顾客资料、80mm 热敏收据（结账时快照，补印显示 REPRINT）、部分 / 全额退款
+- **电子收据**：结账时填顾客 email 自动寄出（可重发）、顾客专属收据链接（可存 PDF）、WhatsApp 按钮（免费）
 - **SaaS**：平台管理后台（开通租户、暂停 / 启用）、套餐限制（门店数 / 员工数）
 - **权限**：店主 OWNER / 经理 MANAGER / 收银员 CASHIER（收银员只能在自己的门店）
 
@@ -44,7 +45,7 @@ npm run dev
 
 - `docker compose up -d db` 启动 PostgreSQL 数据库（以后开机后要用系统，先打开 Docker Desktop，再执行这一行，或 `npm run db:up`）。
 - `npm run setup` 会自动建立 `.env`（并生成随机 `SESSION_SECRET`）、建表、建立套餐和平台管理员，以及一个有示范数据的 demo 店铺。可以重复执行。
-- 已经下载过代码，要更新到最新版：在 `pos-saas` 文件夹执行 `git pull`，然后 `npm install`。
+- 已经下载过代码，要更新到最新版：见下面「更新到最新版」。
 - Mac 的终端（zsh）复制命令时，请一行一行复制上面框里的命令，不要把说明文字一起贴进去。
 
 **不想装 Docker？** 可以用 [Postgres.app](https://postgresapp.com)：安装后点 **Initialize**，然后把 `.env` 里的两行改成（`你的Mac用户名` 换成终端提示符 `@` 前面那个名字）：
@@ -55,6 +56,19 @@ TENANT_DATABASE_URL_TEMPLATE="postgresql://你的Mac用户名@localhost:5432/{db
 ```
 
 > 已经有自己的 PostgreSQL？同样修改这两行即可（数据库用户需要 `CREATEDB` 权限）。
+
+### 更新到最新版
+
+在 `pos-saas` 文件夹，一行一行执行（先打开 Docker Desktop）：
+
+```bash
+git pull
+npm install
+npm run tenants:sync
+npm run dev
+```
+
+`npm run tenants:sync` 会把新的数据表 / 字段加到每个店铺的数据库（不会删除资料）。
 
 ### Demo 账号
 
@@ -71,15 +85,43 @@ TENANT_DATABASE_URL_TEMPLATE="postgresql://你的Mac用户名@localhost:5432/{db
 2. **POS**：搜索 `iphone` → 选一台 IMEI → 再扫条码 `8880000000017`（保护贴）→ 付款选 NETS + Cash → 完成 → 打印收据
 3. **Sales**：打开刚才的单 → 退款（选“Back to stock”或“Defective”）
 4. **Inventory → IMEI / Serial**：点进任何一台，看完整生命周期（收货 → 调货 → 销售 → 退款）
-5. **Purchasing**：打开 `PO-…-00001`（部分收货）→ Receive goods → 512GB 那行贴上测试 IMEI：
+5. **Purchasing**：打开 `PO-…-00001`（部分收货）→ Receive goods → 512GB 那行贴上测试 IMEI（换行、逗号、空格分隔都可以），
+   下面会列出每一台，数量和金额即时更新：
    ```
-   359900000005007
-   359900000005015
+   359900000005007, 359900000005015
    ```
-6. **Transfers**：有一张 HQ → TPY 的“在途”调货单。登出，用 **cashier@example.com** 登录（Toa Payoh）→ 确认收货
+6. **Transfers**：有一张 HQ → TPY 的“在途”调货单。登出，用 **cashier@example.com** 登录（Toa Payoh）→ Receive items →
+   只收一部分（例如保护贴改成 6）→ 单据变成 Partially received。再用 **owner** 打开同一张单，在 Missing items 选“Return to HQ”或“Lost”
 7. **Inventory → Adjustments**：用 “Stock in · Opening stock” 录入期初库存（更多测试 IMEI：`359900000005023`、`359900000005031`、`359900000005049`）
-8. **Settings**：改店名、UEN、GST 号、收据页脚 → 重新打印收据
-9. 终端执行 `npm run inventory:check`，确认库存数据全部一致
+8. **收据快照**：先打印一张新单的收据 → **Settings** 改店名、UEN、GST 号、收据页脚 → 再打印同一张：内容不变，而且印着 `*** REPRINT ***`；新的单才用新资料
+9. **电子收据**：设定好 email（见下面）→ POS 结账时在顾客栏填 email → 完成后自动寄出；**Sales** 打开该单可重发、按 WhatsApp
+10. 终端执行 `npm run inventory:check`，确认库存数据全部一致
+
+## 电子收据（Email）设定
+
+寄件设定放在 `.env`（只在你的电脑 / 服务器上，**不会**上传到 GitHub）。用 TextEdit 打开：
+
+```bash
+open -e .env
+```
+
+在最下面贴上这几行（`SMTP_PASSWORD` 的引号里填邮箱密码），然后存档：
+
+```
+SMTP_HOST="mail.你的网域"
+SMTP_PORT=465
+SMTP_SECURE="true"
+SMTP_USER="完整的email地址"
+SMTP_PASSWORD="邮箱密码"
+```
+
+- `SMTP_HOST` / 端口：问邮箱服务商，或在 Mac「邮件」App → 设置 → 账户 → 服务器设置 → 发件服务器（SMTP）里看。端口 465 用 `SMTP_SECURE="true"`；587 用 `"false"`。
+- 密码里如果有 `$`，要写成 `\$`。
+- 存档后**重新启动** `npm run dev`（Ctrl + C 停止，再执行一次）。
+- 测试：`npm run mail:test`（寄一封测试信给自己），或 **Settings → E-receipt email → Send test email**。
+- 寄件人名称 = Settings 里的店名；顾客回复会寄到 Settings 里的店铺 Email。
+- 邮件里的「View / save receipt」链接要等系统放上网（有网址，并在 `.env` 设 `APP_URL`）后，顾客的手机才打得开；在自己电脑测试时只有本机能打开。
+- 没设定 email 也可以正常收银：顾客 email 照样保存在销售单，设定好后可在销售单页面补寄。
 
 ## 开通真正的店铺
 
@@ -107,7 +149,8 @@ TENANT_DATABASE_URL_TEMPLATE="postgresql://你的Mac用户名@localhost:5432/{db
 | `npm run tenant:create -- …` | 开通新租户 |
 | `npm run db:push:control` | 同步 Control DB 表结构 |
 | `npm run tenants:sync` | 把 `prisma/tenant/schema.prisma` 同步到**所有**租户数据库 |
-| `npm run inventory:check -- --tenant demo` | 检查库存不变量（库存 = 流水、IMEI 数 = 库存数…） |
+| `npm run inventory:check -- --tenant demo` | 检查库存不变量（库存 = 流水、IMEI 数 = 库存数、在途 = 调货单未收…） |
+| `npm run mail:test -- --to you@example.com` | 测试电子收据的寄信设定 |
 | `npm run prisma:generate` | 重新生成 Prisma Client |
 
 ## 修改数据库结构
@@ -127,7 +170,7 @@ docker compose --profile app up -d --build
 docker compose exec app npm run setup -- --no-demo
 ```
 
-正式环境请设置环境变量 `SESSION_SECRET`（随机长字符串）。
+正式环境请设置环境变量 `SESSION_SECRET`（随机长字符串），以及 `APP_URL`（系统网址，电子收据链接用）和 `SMTP_*`（寄信）。
 
 云端部署：任何支持 Docker 的主机（AWS / GCP / DigitalOcean / 阿里云…）。建议：
 

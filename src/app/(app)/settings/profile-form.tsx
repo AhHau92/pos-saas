@@ -19,6 +19,7 @@ type Profile = {
   taxRateBps: number;
   taxInclusive: boolean;
   receiptFooter: string | null;
+  phoneCountryCode: string;
 };
 
 export function ProfileForm({ profile }: { profile: Profile }) {
@@ -62,6 +63,7 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           taxRateBps: Math.round(rate * 100),
           taxInclusive: form.taxInclusive,
           receiptFooter: form.receiptFooter || null,
+          phoneCountryCode: form.phoneCountryCode,
         },
       });
       setMessage({ tone: "green", text: "Saved" });
@@ -91,8 +93,8 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           <Field label="Phone">
             <input className={inputClass} value={form.phone} onChange={(e) => set({ phone: e.target.value })} />
           </Field>
-          <Field label="Email">
-            <input className={inputClass} value={form.email} onChange={(e) => set({ email: e.target.value })} />
+          <Field label="Email" hint="Customers' replies to e-receipts go here">
+            <input type="email" className={inputClass} value={form.email} onChange={(e) => set({ email: e.target.value })} />
           </Field>
           <Field label="Address" className="md:col-span-2">
             <textarea className={inputClass} rows={2} value={form.address} onChange={(e) => set({ address: e.target.value })} />
@@ -118,10 +120,18 @@ export function ProfileForm({ profile }: { profile: Profile }) {
         </div>
       </Card>
       <Card>
-        <CardHeader title="Receipt" />
-        <div className="px-5 py-4">
-          <Field label="Receipt footer" hint="e.g. warranty terms, return policy">
+        <CardHeader title="Receipt" description="Applied to new sales. Receipts already issued keep the details they were printed with." />
+        <div className="grid gap-4 px-5 py-4 md:grid-cols-4">
+          <Field label="Receipt footer" hint="e.g. warranty terms, return policy" className="md:col-span-3">
             <textarea className={inputClass} rows={4} value={form.receiptFooter} onChange={(e) => set({ receiptFooter: e.target.value })} />
+          </Field>
+          <Field label="Phone country code" hint="Added to local numbers for WhatsApp, e.g. 65">
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              value={form.phoneCountryCode}
+              onChange={(e) => set({ phoneCountryCode: e.target.value.replace(/[^\d]/g, "").slice(0, 4) })}
+            />
           </Field>
         </div>
       </Card>

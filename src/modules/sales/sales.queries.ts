@@ -74,6 +74,11 @@ export type SaleDetail = {
   refundedCents: number;
   taxRateBps: number;
   taxInclusive: boolean;
+  /** Snapshots taken at checkout */
+  currency: string;
+  taxName: string;
+  printCount: number;
+  receiptEmail: string | null;
   notes: string | null;
   items: {
     id: string;
@@ -102,6 +107,8 @@ export type SaleDetail = {
     createdBy: string;
     items: { description: string; quantity: number; amountCents: number; disposition: string }[];
   }[];
+  /** E-receipt history, newest first */
+  receiptEmails: { id: string; toEmail: string; status: "SENT" | "FAILED"; error: string | null; sentBy: string | null; createdAt: string }[];
 };
 
 export async function getSaleDetail(db: TenantTx, id: string): Promise<SaleDetail> {
@@ -117,6 +124,7 @@ export async function getSaleDetail(db: TenantTx, id: string): Promise<SaleDetai
         orderBy: { createdAt: "asc" },
         include: { createdBy: true, items: { include: { saleItem: true } } },
       },
+      receiptEmails: { orderBy: { createdAt: "desc" }, take: 20, include: { sentBy: true } },
     },
   });
   if (!s) throw new NotFoundError("Sale not found");
@@ -137,6 +145,10 @@ export async function getSaleDetail(db: TenantTx, id: string): Promise<SaleDetai
     refundedCents: s.refundedCents,
     taxRateBps: s.taxRateBps,
     taxInclusive: s.taxInclusive,
+    currency: s.currency,
+    taxName: s.taxName,
+    printCount: s.printCount,
+    receiptEmail: s.receiptEmail,
     notes: s.notes,
     items: s.items.map((i) => ({
       id: i.id,
@@ -175,6 +187,14 @@ export async function getSaleDetail(db: TenantTx, id: string): Promise<SaleDetai
         amountCents: ri.amountCents,
         disposition: ri.disposition,
       })),
+    })),
+    receiptEmails: s.receiptEmails.map((e) => ({
+      id: e.id,
+      toEmail: e.toEmail,
+      status: e.status,
+      error: e.error,
+      sentBy: e.sentBy?.name ?? null,
+      createdAt: e.createdAt.toISOString(),
     })),
   };
 }

@@ -8,3 +8,6 @@ export type { PosLookupResult, PosUnit } from "./pos-lookup";
 export type { CustomerDTO } from "./customers.service";
 export type { PaymentMethodDTO } from "./payment-methods.service";
 export type { SaleDetail, SaleListItem, SaleStatusValue } from "./sales.queries";
+export { receiptTitle, receiptText, formatTaxRate, maskPhone, maskEmail } from "./receipt";
+export type { ReceiptData, ReceiptHeader } from "./receipt";
+export type { ReceiptShare } from "./receipt.service";

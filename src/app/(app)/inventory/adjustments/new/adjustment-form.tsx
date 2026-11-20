@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { toIncomingUnits, UnitEntry, type UnitDraft } from "@/components/inventory/unit-entry";
 import { VariantPicker } from "@/components/variant-picker";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass, selectClass } from "@/components/ui/form";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Alert, Badge, Card } from "@/components/ui/primitives";
 import { apiRequest, errorMessage } from "@/lib/client-api";
-import { ADJUSTMENT_REASON_OPTIONS, parseUnitLines, UNIT_STATUS_LABELS, type UnitStatus } from "@/modules/inventory/client";
+import { formatMoney } from "@/lib/money";
+import { ADJUSTMENT_REASON_OPTIONS, UNIT_STATUS_LABELS, type UnitStatus } from "@/modules/inventory/client";
 import type { VariantSearchResult } from "@/modules/products/client";
 
 type Kind = "STOCK_IN" | "STOCK_OUT" | "UNIT_STATUS";
@@ -45,7 +47,7 @@ export function AdjustmentForm({
   const [variant, setVariant] = useState<VariantSearchResult | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [unitCostCents, setUnitCostCents] = useState(0);
-  const [unitText, setUnitText] = useState("");
+  const [units, setUnits] = useState<UnitDraft[]>([]);
   const [identifier, setIdentifier] = useState("");
   const [unit, setUnit] = useState<UnitInfo | null>(null);
   const [action, setAction] = useState<Action>("MARK_DEFECTIVE");
@@ -53,7 +55,6 @@ export function AdjustmentForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const parsed = useMemo(() => parseUnitLines(unitText), [unitText]);
   const serialized = variant?.productType === "SERIALIZED";
 
   function switchKind(next: Kind) {
@@ -69,7 +70,7 @@ export function AdjustmentForm({
     setVariant(v);
     setUnitCostCents(v.costCents);
     setQuantity(1);
-    setUnitText("");
+    setUnits([]);
   }
 
   async function lookupUnit() {
@@ -101,8 +102,7 @@ export function AdjustmentForm({
       } else {
         if (!variant) throw new Error("Choose a product");
         if (kind === "STOCK_IN" && serialized) {
-          if (parsed.errors.length > 0) throw new Error(parsed.errors[0]);
-          if (parsed.units.length === 0) throw new Error("Scan at least one IMEI / serial number");
+          if (units.length === 0) throw new Error("Scan at least one IMEI / serial number");
           body = {
             kind,
             reason,
@@ -110,7 +110,7 @@ export function AdjustmentForm({
             outletId,
             variantId: variant.variantId,
             unitCostCents,
-            units: parsed.units.map((u) => ({ imei: u.imei, serialNumber: u.serialNumber, grade: u.grade, batteryHealth: u.batteryHealth })),
+            units: toIncomingUnits(units),
           };
         } else {
           body = {
@@ -127,7 +127,7 @@ export function AdjustmentForm({
       const result = await apiRequest<{ number: string }>("/api/inventory/adjustments", { body });
       setSuccess(`Saved as ${result.number}`);
       setVariant(null);
-      setUnitText("");
+      setUnits([]);
       setUnit(null);
       setIdentifier("");
       setNote("");
@@ -216,19 +216,15 @@ export function AdjustmentForm({
             </Field>
 
             {variant && kind === "STOCK_IN" && serialized ? (
-              <Field
-                label={`IMEI / serial numbers (${parsed.units.length} scanned)`}
-                hint="One per line. Used phones: IMEI,GRADE,BATTERY% — e.g. 356789012345678,A,87"
-                error={parsed.errors[0]}
-              >
-                <textarea
-                  className={`${inputClass} font-mono`}
-                  rows={8}
-                  value={unitText}
-                  onChange={(e) => setUnitText(e.target.value)}
-                  placeholder={"356789012345678\n356789012345679,B,85"}
-                />
-              </Field>
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs font-medium text-slate-700">
+                  <span>IMEI / serial numbers</span>
+                  <span className="tabular-nums text-slate-500">
+                    {units.length} unit{units.length === 1 ? "" : "s"} · {formatMoney(units.length * unitCostCents, currency)}
+                  </span>
+                </div>
+                <UnitEntry units={units} onChange={setUnits} withCondition={variant.condition !== "NEW"} />
+              </div>
             ) : null}
 
             {variant && !(kind === "STOCK_IN" && serialized) ? (

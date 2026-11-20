@@ -8,7 +8,7 @@
 import type { TenantTx } from "@/lib/db/tenant";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { setVariantCost, variantLabel, type ProductTypeValue } from "@/modules/products";
-import { isValidImei, isValidSerial, normalizeIdentifier } from "./imei";
+import { isValidImei, isValidSerial, normalizeGrade, normalizeIdentifier, parseBatteryHealth } from "./imei";
 import { canBeReacquired, canTransition, UNIT_STATUS_LABELS, type UnitStatus } from "./unit-state";
 
 export type DocumentRef = {
@@ -23,6 +23,7 @@ type MovementTypeValue =
   | "SALE_RETURN"
   | "TRANSFER_OUT"
   | "TRANSFER_IN"
+  | "TRANSFER_RETURN"
   | "ADJUSTMENT_IN"
   | "ADJUSTMENT_OUT";
 
@@ -209,12 +210,20 @@ function normalizeIncomingUnit(raw: IncomingUnit, index: number) {
   if (serialNumber && !isValidSerial(serialNumber)) {
     throw new ValidationError(`Unit ${index + 1}: ${serialNumber} is not a valid serial number`);
   }
+  let grade: string | null;
+  let batteryHealth: number | null;
+  try {
+    grade = normalizeGrade(raw.grade);
+    batteryHealth = parseBatteryHealth(raw.batteryHealth);
+  } catch (error) {
+    throw new ValidationError(`${imei ?? serialNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return {
     imei,
     imei2,
     serialNumber,
-    grade: raw.grade?.trim() ? raw.grade.trim().toUpperCase().slice(0, 5) : null,
-    batteryHealth: raw.batteryHealth ?? null,
+    grade,
+    batteryHealth,
     priceCents: raw.priceCents ?? null,
     notes: raw.notes?.trim() ? raw.notes.trim() : null,
   };
@@ -524,7 +533,16 @@ export async function returnStock(
   });
 }
 
-/** Destination outlet confirms a transfer: IN_TRANSIT → IN_STOCK at the destination. */
+async function loadTransitUnit(tx: TenantTx, variant: VariantInfo, stockUnitId: string | null | undefined): Promise<UnitRow> {
+  if (!stockUnitId) throw new ValidationError(`${variant.label}: missing IMEI unit`);
+  const unit = await loadUnit(tx, stockUnitId);
+  if (unit.status !== "IN_TRANSIT") {
+    throw new ConflictError(`${unitName(unit)} is ${UNIT_STATUS_LABELS[unit.status]}, not in transit`);
+  }
+  return unit;
+}
+
+/** Destination outlet confirms (part of) a transfer: IN_TRANSIT → IN_STOCK at the destination. */
 export async function receiveTransferredStock(
   tx: TenantTx,
   input: {
@@ -537,15 +555,13 @@ export async function receiveTransferredStock(
     userId: string;
   },
 ): Promise<void> {
+  if (!Number.isInteger(input.quantity) || input.quantity <= 0) throw new ValidationError("Quantity must be at least 1");
   const variant = await loadVariant(tx, input.variantId);
   if (variant.type === "SERVICE") return;
 
   if (variant.type === "SERIALIZED") {
-    if (!input.stockUnitId) throw new ValidationError(`${variant.label}: missing IMEI unit`);
-    const unit = await loadUnit(tx, input.stockUnitId);
-    if (unit.status !== "IN_TRANSIT") {
-      throw new ConflictError(`${unitName(unit)} is ${UNIT_STATUS_LABELS[unit.status]}, not in transit`);
-    }
+    if (input.quantity !== 1) throw new ValidationError(`${variant.label}: one line per IMEI`);
+    const unit = await loadTransitUnit(tx, variant, input.stockUnitId);
     await transitionUnit(tx, { unit, to: "IN_STOCK", newOutletId: input.toOutletId, ref: input.ref, userId: input.userId });
   }
   const balanceAfter = await increaseLevel(tx, input.toOutletId, variant.id, input.quantity);
@@ -560,6 +576,63 @@ export async function receiveTransferredStock(
     ref: input.ref,
     userId: input.userId,
   });
+}
+
+/**
+ * Items of a transfer that never arrived go back into the SENDING outlet's stock
+ * (IN_TRANSIT → IN_STOCK there, ledger type TRANSFER_RETURN).
+ */
+export async function returnTransferredStock(
+  tx: TenantTx,
+  input: {
+    fromOutletId: string;
+    variantId: string;
+    quantity: number;
+    stockUnitId?: string | null;
+    unitCostCents: number;
+    ref: DocumentRef;
+    userId: string;
+    note?: string | null;
+  },
+): Promise<void> {
+  if (!Number.isInteger(input.quantity) || input.quantity <= 0) throw new ValidationError("Quantity must be at least 1");
+  const variant = await loadVariant(tx, input.variantId);
+  if (variant.type === "SERVICE") return;
+  const note = input.note ?? "Not received — returned to sender";
+
+  if (variant.type === "SERIALIZED") {
+    if (input.quantity !== 1) throw new ValidationError(`${variant.label}: one line per IMEI`);
+    const unit = await loadTransitUnit(tx, variant, input.stockUnitId);
+    await transitionUnit(tx, { unit, to: "IN_STOCK", newOutletId: input.fromOutletId, ref: input.ref, userId: input.userId, note });
+  }
+  const balanceAfter = await increaseLevel(tx, input.fromOutletId, variant.id, input.quantity);
+  await recordMovement(tx, {
+    outletId: input.fromOutletId,
+    variantId: variant.id,
+    stockUnitId: input.stockUnitId ?? null,
+    type: "TRANSFER_RETURN",
+    quantity: input.quantity,
+    balanceAfter,
+    unitCostCents: input.unitCostCents,
+    ref: input.ref,
+    userId: input.userId,
+    note,
+  });
+}
+
+/**
+ * Confirmed lost in transit. The stock already left the sending outlet at dispatch, so no outlet's
+ * stock level changes: an IMEI unit becomes WRITTEN_OFF (with history); for quantity items the
+ * loss is recorded on the transfer document (StockTransferItem.lostQuantity).
+ */
+export async function writeOffTransitStock(
+  tx: TenantTx,
+  input: { variantId: string; stockUnitId?: string | null; ref: DocumentRef; userId: string; note?: string | null },
+): Promise<void> {
+  const variant = await loadVariant(tx, input.variantId);
+  if (variant.type !== "SERIALIZED") return;
+  const unit = await loadTransitUnit(tx, variant, input.stockUnitId);
+  await transitionUnit(tx, { unit, to: "WRITTEN_OFF", ref: input.ref, userId: input.userId, note: input.note ?? "Lost in transit" });
 }
 
 export type UnitAction = "MARK_DEFECTIVE" | "WRITE_OFF" | "RESTORE";
@@ -585,6 +658,14 @@ export async function changeUnitStatus(
     return;
   }
   if (input.action === "WRITE_OFF") {
+    if (unit.status !== "DEFECTIVE") {
+      // e.g. IN_TRANSIT: settle it on the transfer ("lost"), so the transfer document stays correct
+      throw new ConflictError(
+        unit.status === "IN_TRANSIT"
+          ? `${unitName(unit)} is in transit — mark it as lost on the transfer instead`
+          : `${unitName(unit)} is ${UNIT_STATUS_LABELS[unit.status]} and cannot be written off`,
+      );
+    }
     // DEFECTIVE → WRITTEN_OFF: not sellable stock either way, so no quantity movement
     await transitionUnit(tx, { unit, to: "WRITTEN_OFF", ...common });
     return;

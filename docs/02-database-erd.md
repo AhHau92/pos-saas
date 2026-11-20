@@ -66,6 +66,7 @@ erDiagram
     SALE ||--o{ REFUND : ""
     REFUND ||--|{ REFUND_ITEM : ""
     SALE_ITEM }o--o| STOCK_UNIT : "IMEI sold"
+    SALE ||--o{ RECEIPT_EMAIL : "e-receipt log"
     CUSTOMER ||--o{ SALE : ""
     PAYMENT_METHOD ||--o{ PAYMENT : ""
 ```
@@ -225,17 +226,25 @@ erDiagram
         string number UK "TR-2026-00001"
         string fromOutletId FK
         string toOutletId FK
-        enum status "DRAFT / IN_TRANSIT / RECEIVED / CANCELLED"
+        enum status "DRAFT / IN_TRANSIT / PARTIALLY_RECEIVED / RECEIVED / CLOSED / CANCELLED"
         datetime dispatchedAt
-        datetime receivedAt
+        datetime receivedAt "最后一次收货"
+        string resolvedById FK "处理没到的货的经理"
+        datetime resolvedAt
+        string resolutionNote
     }
     STOCK_TRANSFER_ITEM {
         string variantId FK
         string stockUnitId FK "IMEI 商品: 每台一行"
-        int quantity "配件: 数量"
+        int quantity "发出数量"
         int unitCostCents
+        int receivedQuantity "已收"
+        int lostQuantity "途中遗失（报损）"
+        int returnedQuantity "退回发出门店"
     }
 ```
+
+在途数量 = `quantity − receivedQuantity − lostQuantity − returnedQuantity`。
 
 ### 2.6 ⑤ POS 销售 Sales
 
@@ -261,6 +270,19 @@ erDiagram
         int paidCents
         int changeCents
         int refundedCents
+        string currency "快照"
+        string taxName "快照"
+        json receiptHeader "快照: 店名 / UEN / GST 号 / 门店地址 / 页脚 / 收银员"
+        string receiptToken UK "顾客电子收据链接"
+        string receiptEmail "最后寄送的 email"
+        int printCount "打印次数（>0 再印 = REPRINT）"
+    }
+    RECEIPT_EMAIL {
+        string saleId FK
+        string toEmail
+        enum status "SENT / FAILED"
+        string error "失败原因"
+        string sentById FK
     }
     SALE_ITEM {
         string variantId FK
@@ -300,13 +322,13 @@ erDiagram
     }
 ```
 
-**快照原则**：销售明细保存当时的商品名、SKU、IMEI、价格、成本——之后改商品资料不会影响历史单据。
+**快照原则**：销售明细保存当时的商品名、SKU、IMEI、价格、成本；销售单保存当时的收据抬头（店名、UEN、GST 号、门店地址 / 电话、页脚、收银员）、货币和税名——之后改商品资料、设置、门店或员工，都不会影响历史单据和收据。
 
 ### 2.7 组织与设置
 
 | 表 | 说明 |
 | --- | --- |
-| `BusinessProfile` | 只有一行（id=1）：公司名、UEN、GST 注册号、货币、税率、是否含税、收据页脚 |
+| `BusinessProfile` | 只有一行（id=1）：公司名、UEN、GST 注册号、email（顾客回复电子收据）、货币、税率、是否含税、收据页脚、电话国家码（WhatsApp 用，默认 65） |
 | `Outlet` | 门店，`code` 唯一（例：HQ、TPY、JUR），用于销售单号前缀 |
 | `User` | 员工：email 唯一、角色、默认门店、是否启用 |
 | `DocumentSequence` | 单号流水：`key` → 当前值 |

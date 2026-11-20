@@ -2,8 +2,16 @@
  * Client-safe exports of the inventory module (no database code).
  * Client components import from "@/modules/inventory/client", never from "@/modules/inventory".
  */
-export { normalizeIdentifier, isValidImei, parseUnitLine, parseUnitLines } from "./imei";
-export type { ParsedUnit } from "./imei";
+export {
+  normalizeIdentifier,
+  isValidImei,
+  identifierKey,
+  normalizeGrade,
+  parseBatteryHealth,
+  parseIdentifierInput,
+  UNIT_GRADES,
+} from "./imei";
+export type { ParsedIdentifier, UnitGrade } from "./imei";
 export { canTransition, UNIT_STATUSES, UNIT_STATUS_LABELS, UNIT_TRANSITIONS } from "./unit-state";
 export type { UnitStatus } from "./unit-state";
 export type { AvailableUnit, UnitListItem } from "./inventory.queries";

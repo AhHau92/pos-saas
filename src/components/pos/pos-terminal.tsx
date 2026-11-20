@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/form";
 import { Icon } from "@/components/ui/icons";
 import { Modal } from "@/components/ui/modal";
 import { MoneyInput } from "@/components/ui/money-input";
 import { Alert, Badge } from "@/components/ui/primitives";
 import { apiRequest, errorMessage } from "@/lib/client-api";
+import { isValidEmail } from "@/lib/contact";
 import { centsToInput, formatMoney, parseMoneyToCents } from "@/lib/money";
 import type { AvailableUnit } from "@/modules/inventory/client";
 import type { ProductTypeValue, VariantSearchResult } from "@/modules/products/client";
-import { priceLines, type CustomerDTO, type PosLookupResult, type PosUnit } from "@/modules/sales/client";
+import { priceLines, type CustomerDTO, type PosLookupResult, type PosUnit, type ReceiptShare } from "@/modules/sales/client";
 
 type PaymentMethodOption = { id: string; name: string; isCash: boolean };
 
@@ -22,6 +23,8 @@ type Props = {
   taxInclusive: boolean;
   outletLabel: string;
   paymentMethods: PaymentMethodOption[];
+  /** SMTP is set up: e-receipts are emailed automatically after checkout */
+  mailEnabled: boolean;
 };
 
 type CartLine = {
@@ -48,13 +51,14 @@ type PaymentLine = {
   reference: string;
 };
 
-type CustomerState = { id: string | null; name: string; phone: string };
+type CustomerState = { id: string | null; name: string; phone: string; email: string };
 type Notice = { tone: "red" | "amber" | "green"; text: string } | null;
+type EmailStatus = { state: "sending" | "sent" | "failed"; to: string; error?: string } | null;
 
 let keySeq = 0;
 const nextKey = () => `line-${++keySeq}`;
 
-export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outletLabel, paymentMethods }: Props) {
+export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outletLabel, paymentMethods, mailEnabled }: Props) {
   const money = (cents: number) => formatMoney(cents, currency);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const latestQuery = useRef("");
@@ -65,12 +69,17 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
   const [notice, setNotice] = useState<Notice>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [payments, setPayments] = useState<PaymentLine[]>([]);
-  const [customer, setCustomer] = useState<CustomerState>({ id: null, name: "", phone: "" });
+  const [customer, setCustomer] = useState<CustomerState>({ id: null, name: "", phone: "", email: "" });
   const [customerMatches, setCustomerMatches] = useState<CustomerDTO[]>([]);
   const [notes, setNotes] = useState("");
   const [picker, setPicker] = useState<{ variant: VariantSearchResult; units: AvailableUnit[]; loading: boolean; filter: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [completed, setCompleted] = useState<{ id: string; number: string; changeCents: number } | null>(null);
+  const [share, setShare] = useState<ReceiptShare | null>(null);
+  const [emailStatus, setEmailStatus] = useState<EmailStatus>(null);
+  const [emailDraft, setEmailDraft] = useState("");
+  /** The sale shown in the "completed" dialog — late answers for an older sale are ignored */
+  const currentSale = useRef<string | null>(null);
 
   const focusSearch = () => window.setTimeout(() => searchRef.current?.focus(), 0);
 
@@ -262,8 +271,33 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
     ]);
   }
 
+  async function sendEmailReceipt(saleId: string, to: string, explicit: boolean) {
+    setEmailStatus({ state: "sending", to });
+    try {
+      // explicit = typed in the "completed" dialog; otherwise the server uses the address saved with the sale
+      await apiRequest(`/api/sales/${saleId}/receipt/email`, { body: explicit ? { email: to } : {} });
+      if (currentSale.current === saleId) setEmailStatus({ state: "sent", to });
+    } catch (error) {
+      if (currentSale.current === saleId) setEmailStatus({ state: "failed", to, error: errorMessage(error) });
+    }
+  }
+
+  async function loadShare(saleId: string) {
+    try {
+      const result = await apiRequest<ReceiptShare>(`/api/sales/${saleId}/receipt/share`);
+      if (currentSale.current === saleId) setShare(result);
+    } catch {
+      // WhatsApp button just stays hidden
+    }
+  }
+
   async function completeSale() {
     if (!canComplete) return;
+    const receiptEmail = customer.email.trim();
+    if (receiptEmail && !isValidEmail(receiptEmail)) {
+      setNotice({ tone: "red", text: "The customer's email address does not look right" });
+      return;
+    }
     setSubmitting(true);
     setNotice(null);
     try {
@@ -285,10 +319,17 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
           customer: hasCustomer
             ? { id: customer.id, name: customer.name.trim() || null, phone: customer.phone.trim() || null }
             : null,
+          receiptEmail: receiptEmail || null,
           notes: notes.trim() || null,
         },
       });
+      currentSale.current = sale.id;
+      setShare(null);
+      setEmailStatus(null);
+      setEmailDraft(receiptEmail);
       setCompleted({ id: sale.id, number: sale.number, changeCents });
+      void loadShare(sale.id);
+      if (receiptEmail && mailEnabled) void sendEmailReceipt(sale.id, receiptEmail, false);
     } catch (error) {
       setNotice({ tone: "red", text: errorMessage(error) });
     } finally {
@@ -297,9 +338,13 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
   }
 
   function newSale() {
+    currentSale.current = null;
+    setShare(null);
+    setEmailStatus(null);
+    setEmailDraft("");
     setCart([]);
     setPayments([]);
-    setCustomer({ id: null, name: "", phone: "" });
+    setCustomer({ id: null, name: "", phone: "", email: "" });
     setNotes("");
     setResults([]);
     setQuery("");
@@ -468,7 +513,18 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
               onChange={(e) => setCustomer({ ...customer, id: null, name: e.target.value })}
             />
           </div>
+          <input
+            type="email"
+            className={`${inputClass} mt-2`}
+            placeholder={mailEnabled ? "Email for e-receipt (optional)" : "Email (optional)"}
+            value={customer.email}
+            onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
+            aria-label="Customer email"
+          />
           {customer.id ? <p className="mt-1 text-xs text-emerald-600">Existing customer selected</p> : null}
+          {customer.email.trim() && !mailEnabled ? (
+            <p className="mt-1 text-xs text-amber-700">Email sending is not set up yet — the address is saved with the sale.</p>
+          ) : null}
           {customerMatches.length > 0 ? (
             <ul className="mt-2 divide-y divide-slate-100 rounded-md border border-slate-200 text-sm">
               {customerMatches.slice(0, 5).map((c) => (
@@ -477,7 +533,7 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
                     type="button"
                     className="flex w-full justify-between px-3 py-1.5 text-left hover:bg-slate-50"
                     onClick={() => {
-                      setCustomer({ id: c.id, name: c.name, phone: c.phone ?? "" });
+                      setCustomer({ id: c.id, name: c.name, phone: c.phone ?? "", email: customer.email.trim() || (c.email ?? "") });
                       setCustomerMatches([]);
                     }}
                   >
@@ -677,8 +733,13 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
         footer={
           <>
             <Button variant="secondary" onClick={() => completed && window.open(`/receipt/${completed.id}?print=1`, "_blank")}>
-              <Icon name="printer" className="h-4 w-4" /> Print receipt
+              <Icon name="printer" className="h-4 w-4" /> Print
             </Button>
+            {share ? (
+              <a href={share.whatsappUrl} target="_blank" rel="noreferrer" className={buttonClass("secondary")}>
+                <Icon name="chat" className="h-4 w-4" /> WhatsApp
+              </a>
+            ) : null}
             <Button onClick={newSale}>New sale</Button>
           </>
         }
@@ -693,6 +754,44 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
             {completed.changeCents > 0 ? (
               <p className="mt-3 text-2xl font-bold text-emerald-700">Change {money(completed.changeCents)}</p>
             ) : null}
+
+            <div className="mt-5 border-t border-slate-100 pt-4 text-left">
+              {emailStatus?.state === "sending" ? (
+                <p className="text-sm text-slate-600">Sending e-receipt to {emailStatus.to}…</p>
+              ) : emailStatus?.state === "sent" ? (
+                <p className="text-sm text-emerald-700">✓ E-receipt sent to {emailStatus.to}</p>
+              ) : (
+                <>
+                  {emailStatus?.state === "failed" ? (
+                    <p className="mb-2 text-sm text-rose-600">E-receipt not sent: {emailStatus.error}</p>
+                  ) : null}
+                  {mailEnabled ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        className={inputClass}
+                        placeholder="Email the receipt (optional)"
+                        value={emailDraft}
+                        onChange={(e) => setEmailDraft(e.target.value)}
+                        aria-label="Email receipt to"
+                      />
+                      <Button
+                        variant="secondary"
+                        disabled={!isValidEmail(emailDraft.trim())}
+                        onClick={() => completed && void sendEmailReceipt(completed.id, emailDraft.trim(), true)}
+                      >
+                        <Icon name="mail" className="h-4 w-4" /> {emailStatus?.state === "failed" ? "Retry" : "Send"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">E-receipt email is not set up yet (Settings).</p>
+                  )}
+                </>
+              )}
+              {share && !share.whatsappTo ? (
+                <p className="mt-2 text-xs text-slate-500">No phone number given — WhatsApp will ask who to send the receipt to.</p>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </Modal>

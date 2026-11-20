@@ -47,7 +47,7 @@ export async function getDashboard(
     }),
     listLowStock(db, options.outletId, 10),
     db.stockTransfer.findMany({
-      where: { status: "IN_TRANSIT", toOutletId: options.outletId },
+      where: { status: { in: ["IN_TRANSIT", "PARTIALLY_RECEIVED"] }, toOutletId: options.outletId },
       include: { fromOutlet: true, items: true },
       orderBy: { dispatchedAt: "asc" },
       take: 10,
@@ -111,7 +111,8 @@ export async function getDashboard(
       number: t.number,
       fromOutlet: t.fromOutlet.code,
       dispatchedAt: t.dispatchedAt ? t.dispatchedAt.toISOString() : null,
-      quantity: t.items.reduce((s, i) => s + i.quantity, 0),
+      // still in transit (a transfer can be received in parts)
+      quantity: t.items.reduce((s, i) => s + i.quantity - i.receivedQuantity - i.lostQuantity - i.returnedQuantity, 0),
     })),
     recentSales: recent.map((s) => ({
       id: s.id,

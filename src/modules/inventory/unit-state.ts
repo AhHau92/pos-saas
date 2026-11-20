@@ -10,7 +10,8 @@ export const UNIT_STATUSES: readonly UnitStatus[] = ["IN_STOCK", "IN_TRANSIT", "
 /** Allowed transitions: from → to[] */
 export const UNIT_TRANSITIONS: Record<UnitStatus, readonly UnitStatus[]> = {
   IN_STOCK: ["IN_TRANSIT", "SOLD", "DEFECTIVE", "WRITTEN_OFF"],
-  IN_TRANSIT: ["IN_STOCK"],
+  /** received (or returned to the sender) → IN_STOCK; lost on the way → WRITTEN_OFF */
+  IN_TRANSIT: ["IN_STOCK", "WRITTEN_OFF"],
   SOLD: ["IN_STOCK", "DEFECTIVE"],
   DEFECTIVE: ["IN_STOCK", "WRITTEN_OFF"],
   WRITTEN_OFF: ["IN_STOCK"],
