@@ -27,11 +27,14 @@ export function RefundPanel({
   currency,
   items,
   paymentMethods,
+  tradeIn,
 }: {
   saleId: string;
   currency: string;
   items: Item[];
   paymentMethods: { id: string; name: string }[];
+  /** Trade-in used as part payment: the refund amount includes its value */
+  tradeIn: { number: string; creditCents: number } | null;
 }) {
   const router = useRouter();
   const [selection, setSelection] = useState<Record<string, Selection>>({});
@@ -97,6 +100,12 @@ export function RefundPanel({
       <div className="space-y-4 px-5 py-4">
         {error ? <Alert>{error}</Alert> : null}
         {done ? <Alert tone="green">{done}</Alert> : null}
+        {tradeIn ? (
+          <Alert tone="amber">
+            This sale was part-paid with trade-in {tradeIn.number} ({formatMoney(tradeIn.creditCents, currency)}). The refund amount
+            includes that value — the traded-in device stays in stock. Check with your manager before refunding it as money.
+          </Alert>
+        ) : null}
         <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
           {refundable.map((item) => {
             const remaining = item.quantity - item.refundedQuantity;

@@ -42,6 +42,7 @@ export async function refundSale(
 
       const method = await tx.paymentMethod.findUnique({ where: { id: data.paymentMethodId } });
       if (!method || !method.isActive) throw new ValidationError("Unknown or inactive refund method");
+      if (method.isTradeIn) throw new ValidationError("Choose how the money goes back to the customer (cash, card, PayNow …)");
 
       const itemById = new Map(sale.items.map((i) => [i.id, i]));
       const lines = data.items.map((line) => {

@@ -13,6 +13,11 @@ export const PERMISSIONS = {
   "pos.sell": ALL,
   "sales.view": ALL,
   "sales.refund": MANAGEMENT,
+  /** Buy used devices from customers (buy-back or trade-in towards a sale) */
+  "tradeins.create": ALL,
+  "tradeins.view": ALL,
+  /** See a seller's full ID number (others see only the last 4 characters) */
+  "tradeins.viewIdentity": MANAGEMENT,
   "customers.manage": ALL,
   "products.view": ALL,
   "products.manage": MANAGEMENT,

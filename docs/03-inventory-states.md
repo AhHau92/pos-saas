@@ -50,12 +50,17 @@ stateDiagram-v2
 | `TRANSFER_IN` | + | 调货收货（目的门店，可以分几次收） | `TRANSFER` |
 | `TRANSFER_RETURN` | + | 没送到 / 没寄出的货退回发出门店 | `TRANSFER` |
 | `ADJUSTMENT_IN` | + | 期初入库、盘盈、找回、维修完成 | `ADJUSTMENT` |
+| `TRADE_IN` | + | 向顾客收购旧机（换购 / 纯回收），成本 = 收购价 | `TRADE_IN` |
 | `ADJUSTMENT_OUT` | − | 盘亏、损坏、遗失、标记故障 | `ADJUSTMENT` |
 
 - IMEI 商品：**每台一条**流水（`stockUnitId` 有值，数量 ±1）。
 - 配件：每张单据每个 SKU 一条流水（数量 ±N）。
 - `balanceAfter` = 这条流水之后，该门店该 SKU 的结存数量。
 - 不影响"可售数量"的变化（例如退款时直接判定故障：`SOLD → DEFECTIVE`；在途遗失：`IN_TRANSIT → WRITTEN_OFF`）不写流水，只写 `StockUnitEvent`。配件在途遗失的数量记在调货单明细 `lostQuantity`。
+
+> **Trade-in 入库**：用 `receiveStock(movementType: "TRADE_IN")`。IMEI 以前没见过 → 建新的 `StockUnit`；
+> 以前卖出过（`SOLD`）→ 同一个 `StockUnit` 重新入库（`SOLD → IN_STOCK`，型号 / 成色 / 成本更新），历史保留，
+> 可以查到"我们在哪天卖给谁"。还在库存或在途的 IMEI 不能收购（防止重复入库）。
 
 ## 3. 库存不变量（Invariants）
 

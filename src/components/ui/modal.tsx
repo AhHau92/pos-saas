@@ -16,7 +16,7 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
 }) {
   useEffect(() => {
     if (!open) return;
@@ -33,7 +33,7 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
-        className={`w-full ${size === "lg" ? "max-w-2xl" : "max-w-md"} rounded-xl bg-white shadow-xl`}
+        className={`w-full ${size === "xl" ? "max-w-4xl" : size === "lg" ? "max-w-2xl" : "max-w-md"} rounded-xl bg-white shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">

@@ -20,6 +20,8 @@ type Profile = {
   taxInclusive: boolean;
   receiptFooter: string | null;
   phoneCountryCode: string;
+  tradeInRequireSellerId: boolean;
+  tradeInRequirePoliceCheck: boolean;
 };
 
 export function ProfileForm({ profile }: { profile: Profile }) {
@@ -64,6 +66,8 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           taxInclusive: form.taxInclusive,
           receiptFooter: form.receiptFooter || null,
           phoneCountryCode: form.phoneCountryCode,
+          tradeInRequireSellerId: form.tradeInRequireSellerId,
+          tradeInRequirePoliceCheck: form.tradeInRequirePoliceCheck,
         },
       });
       setMessage({ tone: "green", text: "Saved" });
@@ -79,7 +83,10 @@ export function ProfileForm({ profile }: { profile: Profile }) {
     <form onSubmit={onSubmit} className="max-w-3xl space-y-6">
       {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
       <Card>
-        <CardHeader title="Company" description="Shown on receipts" />
+        <CardHeader
+          title="Business"
+          description="Brand name shown on receipts. The UEN / GST no. here are used by outlets without their own company (Settings → Companies)."
+        />
         <div className="grid gap-4 px-5 py-4 md:grid-cols-2">
           <Field label="Business name" className="md:col-span-2">
             <input className={inputClass} value={form.name} onChange={(e) => set({ name: e.target.value })} required />
@@ -133,6 +140,35 @@ export function ProfileForm({ profile }: { profile: Profile }) {
               onChange={(e) => set({ phoneCountryCode: e.target.value.replace(/[^\d]/g, "").slice(0, 4) })}
             />
           </Field>
+        </div>
+      </Card>
+      <Card>
+        <CardHeader title="Trade-ins" description="Rules for buying used devices from customers. Singapore secondhand dealers: keep both on." />
+        <div className="space-y-2 px-5 py-4 text-sm">
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className={`${checkboxClass} mt-0.5`}
+              checked={form.tradeInRequireSellerId}
+              onChange={(e) => set({ tradeInRequireSellerId: e.target.checked })}
+            />
+            <span>
+              Seller&apos;s ID number and address are required
+              <span className="block text-xs text-slate-500">Secondhand Goods Dealers Rules: record name, NRIC / FIN / passport no. and address.</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className={`${checkboxClass} mt-0.5`}
+              checked={form.tradeInRequirePoliceCheck}
+              onChange={(e) => set({ tradeInRequirePoliceCheck: e.target.checked })}
+            />
+            <span>
+              Staff must confirm the device was screened on the Police system
+              <span className="block text-xs text-slate-500">Do not buy when the result is “RECORD FOUND”.</span>
+            </span>
+          </label>
         </div>
       </Card>
       <div className="flex justify-end">

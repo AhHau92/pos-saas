@@ -17,9 +17,9 @@ export async function nextSequenceValue(tx: TenantTx, key: string): Promise<numb
   return value;
 }
 
-export type DocumentPrefix = "PO" | "GRN" | "TR" | "RF" | "ADJ";
+export type DocumentPrefix = "PO" | "GRN" | "TR" | "RF" | "ADJ" | "TI";
 
-/** PO-2026-00001, GRN-2026-00001, TR-..., RF-..., ADJ-... (yearly sequence) */
+/** PO-2026-00001, GRN-2026-00001, TR-..., RF-..., ADJ-..., TI-... (trade-in) (yearly sequence) */
 export async function nextDocumentNumber(tx: TenantTx, prefix: DocumentPrefix, now: Date = new Date()): Promise<string> {
   const year = yearInTimeZone(now);
   const value = await nextSequenceValue(tx, `${prefix}:${year}`);

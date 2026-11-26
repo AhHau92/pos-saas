@@ -60,13 +60,13 @@ src/
 | --- | --- | --- |
 | tenant | Control DB：`Plan`、`Tenant`、`Subscription`、`PlatformAdmin` | settings、outlets、users、sales（只在开通租户时初始化数据） |
 | settings | `BusinessProfile` | – |
-| outlets | `Outlet` | – |
+| outlets | `Outlet`、`Company`（法律实体 / GST 登记，见 04 §7） | – |
 | users | `User` | – |
 | products | `Brand`、`Category`、`Product`、`ProductVariant` | – |
 | inventory | `StockLevel`、`StockUnit`、`StockUnitEvent`、`InventoryMovement`、`StockAdjustment` | products |
 | purchasing | `Supplier`、`PurchaseOrder(+Item)`、`GoodsReceipt(+Item)` | inventory、products |
 | transfers | `StockTransfer(+Item)` | inventory、products |
-| sales | `Customer`、`PaymentMethod`、`Sale`、`SaleItem`、`Payment`、`Refund`、`RefundItem`、`ReceiptEmail` | inventory、products、settings |
+| sales | `Customer`、`PaymentMethod`、`Sale`、`SaleItem`、`Payment`、`Refund`、`RefundItem`、`ReceiptEmail`、`TradeIn`、`TradeInItem` | inventory、products、settings、outlets |
 | reports | （只读） | – |
 | lib（shared kernel） | `DocumentSequence`（单号流水）；`lib/mail.ts`（SMTP 寄信，环境变量设定） | – |
 

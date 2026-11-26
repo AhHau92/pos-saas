@@ -12,7 +12,10 @@ import { formatMoney } from "@/lib/money";
 import { formatDateTime } from "@/lib/time";
 
 export type ReceiptHeader = {
+  /** Brand / trading name */
   businessName: string;
+  /** Legal entity the outlet trades as, when different from the brand (e.g. "Mobile Relation 1 Pte Ltd") */
+  legalName: string | null;
   /** Company registration no. (UEN) */
   registrationNo: string | null;
   /** GST registration no. */
@@ -40,12 +43,15 @@ export function buildReceiptHeader(input: {
   };
   outlet: { code: string; name: string; address: string | null; phone: string | null };
   cashierName: string;
+  /** The outlet's company (GST registration). Omitted = the business profile's own details. */
+  legal?: { legalName: string | null; registrationNo: string | null; taxRegistrationNo: string | null };
 }): ReceiptHeader {
-  const { profile, outlet } = input;
+  const { profile, outlet, legal } = input;
   return {
     businessName: profile.name,
-    registrationNo: profile.registrationNo,
-    taxRegistrationNo: profile.taxRegistrationNo,
+    legalName: legal?.legalName && legal.legalName !== profile.name ? legal.legalName : null,
+    registrationNo: legal ? legal.registrationNo : profile.registrationNo,
+    taxRegistrationNo: legal ? legal.taxRegistrationNo : profile.taxRegistrationNo,
     businessAddress: profile.address,
     businessPhone: profile.phone,
     businessEmail: profile.email,
@@ -68,6 +74,7 @@ export function parseReceiptHeader(value: unknown): ReceiptHeader | null {
   if (!businessName || !outletName) return null;
   return {
     businessName,
+    legalName: text("legalName"),
     registrationNo: text("registrationNo"),
     taxRegistrationNo: text("taxRegistrationNo"),
     businessAddress: text("businessAddress"),

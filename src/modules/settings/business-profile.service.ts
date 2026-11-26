@@ -18,6 +18,10 @@ export type BusinessProfileDTO = {
   receiptFooter: string | null;
   /** Calling code added to local customer numbers for WhatsApp links, e.g. "65" */
   phoneCountryCode: string;
+  /** Trade-ins: seller's ID number + address required (Singapore secondhand dealers) */
+  tradeInRequireSellerId: boolean;
+  /** Trade-ins: staff must confirm the Police screening */
+  tradeInRequirePoliceCheck: boolean;
 };
 
 type ProfileRow = {
@@ -33,6 +37,8 @@ type ProfileRow = {
   taxInclusive: boolean;
   receiptFooter: string | null;
   phoneCountryCode: string;
+  tradeInRequireSellerId: boolean;
+  tradeInRequirePoliceCheck: boolean;
 };
 
 function toDto(row: ProfileRow): BusinessProfileDTO {
@@ -49,6 +55,8 @@ function toDto(row: ProfileRow): BusinessProfileDTO {
     taxInclusive: row.taxInclusive,
     receiptFooter: row.receiptFooter,
     phoneCountryCode: row.phoneCountryCode,
+    tradeInRequireSellerId: row.tradeInRequireSellerId,
+    tradeInRequirePoliceCheck: row.tradeInRequirePoliceCheck,
   };
 }
 
@@ -81,6 +89,8 @@ const businessProfileSchema = z.object({
     .regex(/^\+?\d{1,4}$/, "Use the country calling code, e.g. 65")
     .transform((v) => v.replace("+", ""))
     .optional(),
+  tradeInRequireSellerId: z.boolean().optional(),
+  tradeInRequirePoliceCheck: z.boolean().optional(),
 });
 
 export async function updateBusinessProfile(ctx: ServiceContext, input: unknown): Promise<BusinessProfileDTO> {
@@ -99,6 +109,8 @@ export async function updateBusinessProfile(ctx: ServiceContext, input: unknown)
     taxInclusive: data.taxInclusive,
     receiptFooter: emptyToNull(data.receiptFooter),
     ...(data.phoneCountryCode ? { phoneCountryCode: data.phoneCountryCode } : {}),
+    ...(data.tradeInRequireSellerId === undefined ? {} : { tradeInRequireSellerId: data.tradeInRequireSellerId }),
+    ...(data.tradeInRequirePoliceCheck === undefined ? {} : { tradeInRequirePoliceCheck: data.tradeInRequirePoliceCheck }),
   };
   const row = await ctx.db.businessProfile.upsert({
     where: { id: 1 },

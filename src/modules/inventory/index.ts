@@ -47,6 +47,7 @@ export {
   normalizeGrade,
   parseBatteryHealth,
   parseIdentifierInput,
+  parseIdentifierToken,
   UNIT_GRADES,
   type ParsedIdentifier,
   type UnitGrade,

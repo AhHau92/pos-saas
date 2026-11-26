@@ -12,7 +12,7 @@ import { isValidImei, isValidSerial, normalizeGrade, normalizeIdentifier, parseB
 import { canBeReacquired, canTransition, UNIT_STATUS_LABELS, type UnitStatus } from "./unit-state";
 
 export type DocumentRef = {
-  refType: "GOODS_RECEIPT" | "SALE" | "REFUND" | "TRANSFER" | "ADJUSTMENT";
+  refType: "GOODS_RECEIPT" | "SALE" | "REFUND" | "TRANSFER" | "ADJUSTMENT" | "TRADE_IN";
   refId: string;
   refNo: string;
 };
@@ -24,6 +24,7 @@ type MovementTypeValue =
   | "TRANSFER_OUT"
   | "TRANSFER_IN"
   | "TRANSFER_RETURN"
+  | "TRADE_IN"
   | "ADJUSTMENT_IN"
   | "ADJUSTMENT_OUT";
 
@@ -245,7 +246,7 @@ export async function receiveStock(
     unitCostCents: number;
     units?: IncomingUnit[];
     goodsReceiptItemId?: string | null;
-    movementType: "PURCHASE_RECEIPT" | "ADJUSTMENT_IN";
+    movementType: "PURCHASE_RECEIPT" | "ADJUSTMENT_IN" | "TRADE_IN";
     ref: DocumentRef;
     userId: string;
     note?: string | null;

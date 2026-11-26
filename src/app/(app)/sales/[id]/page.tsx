@@ -113,13 +113,20 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
               <dt>Subtotal</dt>
               <dd className="tabular-nums">{money(sale.subtotalCents)}</dd>
             </div>
-            <div className="flex justify-between text-slate-600">
-              <dt>
-                {sale.taxInclusive ? "Incl. " : ""}
-                {sale.taxName} {sale.taxRateBps / 100}%
-              </dt>
-              <dd className="tabular-nums">{money(sale.taxCents)}</dd>
-            </div>
+            {sale.taxRateBps > 0 ? (
+              <div className="flex justify-between text-slate-600">
+                <dt>
+                  {sale.taxInclusive ? "Incl. " : ""}
+                  {sale.taxName} {sale.taxRateBps / 100}%
+                </dt>
+                <dd className="tabular-nums">{money(sale.taxCents)}</dd>
+              </div>
+            ) : (
+              <div className="flex justify-between text-slate-500">
+                <dt>No {sale.taxName} (not registered)</dt>
+                <dd />
+              </div>
+            )}
             <div className="flex justify-between font-semibold text-slate-900">
               <dt>Total</dt>
               <dd className="tabular-nums">{money(sale.totalCents)}</dd>
@@ -145,6 +152,13 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
               </li>
             ))}
           </ul>
+          {sale.tradeIn ? (
+            <div className="border-t border-slate-100 px-5 py-2.5 text-sm">
+              <Link href={`/trade-ins/${sale.tradeIn.id}`} className="font-medium text-indigo-600 hover:underline">
+                View trade-in {sale.tradeIn.number} →
+              </Link>
+            </div>
+          ) : null}
         </Card>
         <Card>
           <CardHeader title="Refunds" />
@@ -202,6 +216,7 @@ export default async function SaleDetailPage({ params }: { params: Promise<{ id:
             refundedCents: i.refundedCents,
           }))}
           paymentMethods={methods.map((m) => ({ id: m.id, name: m.name }))}
+          tradeIn={sale.tradeIn}
         />
       ) : null}
     </div>

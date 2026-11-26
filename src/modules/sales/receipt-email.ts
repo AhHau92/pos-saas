@@ -47,6 +47,7 @@ export function receiptEmailHtml(receipt: ReceiptData, options: { link?: string 
   const title = receiptTitle(receipt);
 
   const headerLines = [
+    h.legalName ? escapeHtml(h.legalName) : null,
     h.outletName !== h.businessName ? escapeHtml(h.outletName) : null,
     h.outletAddress ? multiline(h.outletAddress) : null,
     h.outletPhone ? `Tel: ${escapeHtml(h.outletPhone)}` : null,
@@ -138,6 +139,7 @@ export function receiptEmailText(receipt: ReceiptData, options: { link?: string 
   const h = receipt.header;
   const rate = formatTaxRate(receipt.taxRateBps);
   const lines: string[] = [h.businessName];
+  if (h.legalName) lines.push(h.legalName);
   if (h.outletName !== h.businessName) lines.push(h.outletName);
   if (h.outletAddress) lines.push(h.outletAddress);
   if (h.outletPhone) lines.push(`Tel: ${h.outletPhone}`);

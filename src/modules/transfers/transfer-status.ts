@@ -1,6 +1,6 @@
 /**
  * Transfer status rules. Pure module (used by the service, the pages and the tests).
- * See docs/04-business-flows.md §4.
+ * See docs/04-business-flows.md §2.
  *
  *   DRAFT ──dispatch──▶ IN_TRANSIT ──receive part──▶ PARTIALLY_RECEIVED ──receive rest──▶ RECEIVED
  *     │                    │                              │

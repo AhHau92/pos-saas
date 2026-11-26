@@ -1,6 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  draftTotal,
+  emptyTradeInDraft,
+  TradeInEditor,
+  tradeInPayload,
+  tradeInProblem,
+  type TradeInDraft,
+  type TradeInRules,
+} from "@/components/tradein/tradein-editor";
 import { Button, buttonClass } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/form";
 import { Icon } from "@/components/ui/icons";
@@ -25,6 +34,9 @@ type Props = {
   paymentMethods: PaymentMethodOption[];
   /** SMTP is set up: e-receipts are emailed automatically after checkout */
   mailEnabled: boolean;
+  /** The user may take the customer's old device(s) as part payment */
+  canTradeIn: boolean;
+  tradeInRules: TradeInRules;
 };
 
 type CartLine = {
@@ -54,11 +66,22 @@ type PaymentLine = {
 type CustomerState = { id: string | null; name: string; phone: string; email: string };
 type Notice = { tone: "red" | "amber" | "green"; text: string } | null;
 type EmailStatus = { state: "sending" | "sent" | "failed"; to: string; error?: string } | null;
+type CompletedSale = { id: string; number: string; changeCents: number; tradeIn: { id: string; number: string } | null };
 
 let keySeq = 0;
 const nextKey = () => `line-${++keySeq}`;
 
-export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outletLabel, paymentMethods, mailEnabled }: Props) {
+export function PosTerminal({
+  currency,
+  taxName,
+  taxRateBps,
+  taxInclusive,
+  outletLabel,
+  paymentMethods,
+  mailEnabled,
+  canTradeIn,
+  tradeInRules,
+}: Props) {
   const money = (cents: number) => formatMoney(cents, currency);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const latestQuery = useRef("");
@@ -74,7 +97,13 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
   const [notes, setNotes] = useState("");
   const [picker, setPicker] = useState<{ variant: VariantSearchResult; units: AvailableUnit[]; loading: boolean; filter: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [completed, setCompleted] = useState<{ id: string; number: string; changeCents: number } | null>(null);
+  const [completed, setCompleted] = useState<CompletedSale | null>(null);
+  /** Trade-in applied to this sale (part payment) */
+  const [tradeIn, setTradeIn] = useState<TradeInDraft | null>(null);
+  /** Copy being edited in the trade-in dialog (kept if the dialog is closed by accident) */
+  const [tradeInWork, setTradeInWork] = useState<TradeInDraft | null>(null);
+  const [tradeInOpen, setTradeInOpen] = useState(false);
+  const [tradeInError, setTradeInError] = useState<string | null>(null);
   const [share, setShare] = useState<ReceiptShare | null>(null);
   const [emailStatus, setEmailStatus] = useState<EmailStatus>(null);
   const [emailDraft, setEmailDraft] = useState("");
@@ -136,20 +165,30 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
   }, [cart, taxRateBps, taxInclusive]);
 
   const totalCents = pricing.totals?.totalCents ?? 0;
+  // A trade-in is a part payment: GST stays on the full sale total (IRAS), the customer pays the rest.
+  const tradeInCreditCents = tradeIn ? draftTotal(tradeIn) : 0;
+  const tradeInTooHigh = tradeInCreditCents > totalCents;
+  const dueCents = Math.max(0, totalCents - tradeInCreditCents);
   const paymentCents = payments.map((p) => parseMoneyToCents(p.amount));
   const paidCents = paymentCents.reduce<number>((s, c) => s + (c ?? 0), 0);
   const nonCashCents = payments.reduce((s, p, i) => s + (p.isCash ? 0 : (paymentCents[i] ?? 0)), 0);
   const cashCents = paidCents - nonCashCents;
-  const remainingCents = Math.max(0, totalCents - paidCents);
-  const changeCents = Math.max(0, paidCents - totalCents);
+  const remainingCents = Math.max(0, dueCents - paidCents);
+  const changeCents = Math.max(0, paidCents - dueCents);
 
   let paymentError: string | null = null;
   if (paymentCents.some((c) => c === null || c <= 0)) paymentError = "Enter a valid amount for every payment";
-  else if (nonCashCents > totalCents) paymentError = "Card / e-wallet payments are more than the total";
+  else if (nonCashCents > dueCents) paymentError = "Card / e-wallet payments are more than the amount due";
   else if (changeCents > 0 && changeCents >= cashCents) paymentError = "Remove the extra cash payment";
 
   const canComplete =
-    cart.length > 0 && !pricing.error && !paymentError && paidCents >= totalCents && !submitting && (totalCents > 0 || payments.length === 0);
+    cart.length > 0 &&
+    !pricing.error &&
+    !paymentError &&
+    !tradeInTooHigh &&
+    paidCents >= dueCents &&
+    !submitting &&
+    (dueCents > 0 || payments.length === 0);
 
   // ── adding items ──
   function addUnit(unit: Pick<PosUnit, "stockUnitId" | "variantId" | "sku" | "label" | "imei" | "serialNumber" | "priceCents">) {
@@ -264,11 +303,44 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
   }
 
   function addPayment(method: PaymentMethodOption) {
-    const due = Math.max(0, totalCents - paidCents);
+    const due = Math.max(0, dueCents - paidCents);
     setPayments((p) => [
       ...p,
       { key: nextKey(), paymentMethodId: method.id, name: method.name, isCash: method.isCash, amount: centsToInput(due), reference: "" },
     ]);
+  }
+
+  // ── trade-in (customer's old device as part payment) ──
+  function openTradeIn() {
+    setTradeInError(null);
+    setTradeInWork((work) => work ?? tradeIn ?? emptyTradeInDraft({ name: customer.name.trim(), phone: customer.phone.trim() }));
+    setTradeInOpen(true);
+  }
+
+  function applyTradeIn() {
+    if (!tradeInWork) return;
+    const problem = tradeInProblem(tradeInWork, tradeInRules);
+    if (problem) {
+      setTradeInError(problem);
+      return;
+    }
+    setTradeIn(tradeInWork);
+    // The seller is usually the buyer: fill the customer if the cashier has not entered one
+    if (!customer.id) {
+      setCustomer((c) => ({
+        ...c,
+        name: c.name.trim() ? c.name : tradeInWork.seller.name.trim(),
+        phone: c.phone.trim() ? c.phone : tradeInWork.seller.phone.trim(),
+      }));
+    }
+    setTradeInOpen(false);
+  }
+
+  function removeTradeIn() {
+    setTradeIn(null);
+    setTradeInWork(null);
+    setTradeInError(null);
+    setTradeInOpen(false);
   }
 
   async function sendEmailReceipt(saleId: string, to: string, explicit: boolean) {
@@ -298,11 +370,18 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
       setNotice({ tone: "red", text: "The customer's email address does not look right" });
       return;
     }
+    if (tradeIn) {
+      const problem = tradeInProblem(tradeIn, tradeInRules);
+      if (problem) {
+        setNotice({ tone: "red", text: `Trade-in: ${problem}` });
+        return;
+      }
+    }
     setSubmitting(true);
     setNotice(null);
     try {
       const hasCustomer = Boolean(customer.id || customer.phone.trim() || customer.name.trim());
-      const sale = await apiRequest<{ id: string; number: string }>("/api/sales", {
+      const sale = await apiRequest<{ id: string; number: string; tradeIn: { id: string; number: string } | null }>("/api/sales", {
         body: {
           lines: cart.map((l) => ({
             variantId: l.variantId,
@@ -321,13 +400,14 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
             : null,
           receiptEmail: receiptEmail || null,
           notes: notes.trim() || null,
+          tradeIn: tradeIn ? tradeInPayload(tradeIn) : null,
         },
       });
       currentSale.current = sale.id;
       setShare(null);
       setEmailStatus(null);
       setEmailDraft(receiptEmail);
-      setCompleted({ id: sale.id, number: sale.number, changeCents });
+      setCompleted({ id: sale.id, number: sale.number, changeCents, tradeIn: sale.tradeIn });
       void loadShare(sale.id);
       if (receiptEmail && mailEnabled) void sendEmailReceipt(sale.id, receiptEmail, false);
     } catch (error) {
@@ -345,6 +425,9 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
     setCart([]);
     setPayments([]);
     setCustomer({ id: null, name: "", phone: "", email: "" });
+    setTradeIn(null);
+    setTradeInWork(null);
+    setTradeInError(null);
     setNotes("");
     setResults([]);
     setQuery("");
@@ -571,7 +654,38 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
               <dt>Total</dt>
               <dd className="tabular-nums">{money(totalCents)}</dd>
             </div>
+            {tradeIn ? (
+              <>
+                <div className="flex justify-between text-slate-600">
+                  <dt>
+                    Trade-in · {tradeIn.devices.length} device{tradeIn.devices.length === 1 ? "" : "s"}
+                  </dt>
+                  <dd className="tabular-nums">−{money(tradeInCreditCents)}</dd>
+                </div>
+                <div className="flex justify-between text-base font-semibold text-slate-900">
+                  <dt>Amount due</dt>
+                  <dd className="tabular-nums">{money(dueCents)}</dd>
+                </div>
+              </>
+            ) : null}
           </dl>
+          {canTradeIn ? (
+            <div className="mt-3 flex items-center gap-2">
+              <Button variant="secondary" size="sm" disabled={cart.length === 0} onClick={openTradeIn}>
+                <Icon name="phone" className="h-4 w-4" /> {tradeIn ? "Edit trade-in" : "Trade-in"}
+              </Button>
+              {tradeIn ? (
+                <button type="button" className="text-xs text-rose-600 hover:underline" onClick={removeTradeIn}>
+                  Remove trade-in
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {tradeInTooHigh && cart.length > 0 ? (
+            <div className="mt-2">
+              <Alert tone="amber">The trade-in is worth more than this sale. Lower the trade-in price, or record it under Trade-ins → Buy a device.</Alert>
+            </div>
+          ) : null}
           {pricing.error ? (
             <div className="mt-2">
               <Alert>{pricing.error}</Alert>
@@ -668,7 +782,7 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
             onChange={(e) => setNotes(e.target.value)}
           />
           <Button size="lg" variant="success" className="mt-3 w-full" disabled={!canComplete} loading={submitting} onClick={completeSale}>
-            <Icon name="check" className="h-5 w-5" /> Complete sale · {money(totalCents)}
+            <Icon name="check" className="h-5 w-5" /> Complete sale · {money(dueCents)}
           </Button>
         </div>
       </div>
@@ -725,6 +839,40 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
         ) : null}
       </Modal>
 
+      {/* Trade-in (part payment) */}
+      <Modal
+        open={tradeInOpen}
+        title="Trade-in · customer's old device"
+        onClose={() => setTradeInOpen(false)}
+        size="xl"
+        footer={
+          <>
+            {tradeIn ? (
+              <Button variant="secondary" onClick={removeTradeIn}>
+                Remove trade-in
+              </Button>
+            ) : null}
+            <Button variant="secondary" onClick={() => setTradeInOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={applyTradeIn}>
+              <Icon name="check" className="h-4 w-4" /> Apply {tradeInWork ? money(draftTotal(tradeInWork)) : ""}
+            </Button>
+          </>
+        }
+      >
+        {tradeInWork ? (
+          <div className="space-y-3">
+            {tradeInError ? <Alert>{tradeInError}</Alert> : null}
+            <p className="text-xs text-slate-500">
+              The trade-in value is taken off what the customer pays. {taxRateBps > 0 ? `${taxName} is still charged on the full sale price.` : ""} The
+              device goes into stock at this outlet when the sale is completed.
+            </p>
+            <TradeInEditor value={tradeInWork} onChange={setTradeInWork} currency={currency} rules={tradeInRules} />
+          </div>
+        ) : null}
+      </Modal>
+
       {/* Sale completed */}
       <Modal
         open={completed !== null}
@@ -735,6 +883,14 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
             <Button variant="secondary" onClick={() => completed && window.open(`/receipt/${completed.id}?print=1`, "_blank")}>
               <Icon name="printer" className="h-4 w-4" /> Print
             </Button>
+            {completed?.tradeIn ? (
+              <Button
+                variant="secondary"
+                onClick={() => completed.tradeIn && window.open(`/trade-in-slip/${completed.tradeIn.id}?print=1`, "_blank")}
+              >
+                <Icon name="printer" className="h-4 w-4" /> Trade-in slip
+              </Button>
+            ) : null}
             {share ? (
               <a href={share.whatsappUrl} target="_blank" rel="noreferrer" className={buttonClass("secondary")}>
                 <Icon name="chat" className="h-4 w-4" /> WhatsApp
@@ -753,6 +909,11 @@ export function PosTerminal({ currency, taxName, taxRateBps, taxInclusive, outle
             <p className="text-lg font-semibold">{completed.number}</p>
             {completed.changeCents > 0 ? (
               <p className="mt-3 text-2xl font-bold text-emerald-700">Change {money(completed.changeCents)}</p>
+            ) : null}
+            {completed.tradeIn ? (
+              <p className="mt-3 text-sm text-slate-600">
+                Trade-in <span className="font-medium">{completed.tradeIn.number}</span> recorded — print the slip for the customer to sign.
+              </p>
             ) : null}
 
             <div className="mt-5 border-t border-slate-100 pt-4 text-left">

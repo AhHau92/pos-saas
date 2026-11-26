@@ -30,6 +30,15 @@ import {
   type ReceiptData,
 } from "../src/modules/sales/receipt";
 import { escapeHtml, receiptEmailHtml, receiptEmailSubject, receiptEmailText } from "../src/modules/sales/receipt-email";
+import {
+  failedChecks,
+  maskIdNumber,
+  missingRequiredChecks,
+  normalizeSellerId,
+  sellerDeclaration,
+  tradeInTotal,
+} from "../src/modules/sales/tradein";
+import { effectiveTax } from "../src/modules/outlets/tax";
 
 test("GST 9% inclusive: tax is contained in the price", () => {
   assert.equal(lineTax(109000, 900, true), 9000); // $1090 incl. → $90 GST
@@ -240,6 +249,89 @@ test("permissions", () => {
   assert.equal(can("MANAGER", "inventory.adjust"), true);
   assert.equal(can("MANAGER", "users.manage"), false);
   assert.equal(can("OWNER", "settings.manage"), true);
+  assert.equal(can("CASHIER", "tradeins.create"), true);
+  assert.equal(can("CASHIER", "tradeins.viewIdentity"), false);
+  assert.equal(can("MANAGER", "tradeins.viewIdentity"), true);
+});
+
+// ───────────── per-company GST ─────────────
+
+const PROFILE = {
+  name: "Mobile Relation",
+  registrationNo: "201912345K",
+  taxRegistrationNo: "M90312345A",
+  taxRateBps: 900,
+  taxInclusive: true,
+};
+
+test("outlet tax: no company → business profile (single-company shops)", () => {
+  assert.deepEqual(effectiveTax(PROFILE, null), {
+    legalName: null,
+    registrationNo: "201912345K",
+    taxRegistrationNo: "M90312345A",
+    gstRegistered: true,
+    taxRateBps: 900,
+    taxInclusive: true,
+  });
+  assert.equal(effectiveTax({ ...PROFILE, taxRateBps: 0, taxRegistrationNo: null }, null).gstRegistered, false);
+});
+
+test("outlet tax: GST-registered company uses the profile rate and its own numbers", () => {
+  const tax = effectiveTax(PROFILE, { name: "MR Trading Pte Ltd", registrationNo: "202011111A", gstRegistered: true, taxRegistrationNo: "M91111111B" });
+  assert.equal(tax.legalName, "MR Trading Pte Ltd");
+  assert.equal(tax.registrationNo, "202011111A");
+  assert.equal(tax.taxRegistrationNo, "M91111111B");
+  assert.equal(tax.taxRateBps, 900);
+});
+
+test("outlet tax: non-registered company charges no GST and prints no GST reg no.", () => {
+  const tax = effectiveTax(PROFILE, { name: "MR Retail Pte Ltd", registrationNo: "202022222C", gstRegistered: false, taxRegistrationNo: "M9STALE" });
+  assert.equal(tax.gstRegistered, false);
+  assert.equal(tax.taxRateBps, 0);
+  assert.equal(tax.taxRegistrationNo, null);
+  // no GST at all: the price is the total
+  const totals = priceLines([{ quantity: 1, unitPriceCents: 109000, discountCents: 0 }], tax.taxRateBps, tax.taxInclusive);
+  assert.equal(totals.taxCents, 0);
+  assert.equal(totals.totalCents, 109000);
+});
+
+// ───────────── trade-ins ─────────────
+
+test("trade-in seller ID: NRIC / FIN format, passports, masking", () => {
+  assert.equal(normalizeSellerId("NRIC", " s1234567a "), "S1234567A");
+  assert.equal(normalizeSellerId("FIN", "G-1234567-X"), "G1234567X");
+  assert.throws(() => normalizeSellerId("NRIC", "1234567A"), /S1234567A/);
+  assert.throws(() => normalizeSellerId("FIN", "S123456A"));
+  assert.equal(normalizeSellerId("PASSPORT", "e1234567x"), "E1234567X");
+  assert.throws(() => normalizeSellerId("PASSPORT", "AB"), /4–20/);
+  assert.equal(maskIdNumber("S1234567A"), "•••••567A");
+  assert.equal(maskIdNumber("AB12"), "AB12");
+  assert.equal(maskIdNumber(null), null);
+});
+
+test("trade-in checklist and totals", () => {
+  assert.equal(missingRequiredChecks({}).length, 1, "account sign-out is required");
+  assert.deepEqual(missingRequiredChecks({ accountRemoved: true }), []);
+  assert.deepEqual(failedChecks({ accountRemoved: true, screenOk: false, camerasOk: true }), [
+    "Screen and touch OK (no cracks, lines or dead spots)",
+  ]);
+  assert.deepEqual(failedChecks(null), []);
+  assert.equal(tradeInTotal([{ priceCents: 30000 }, { priceCents: 12550 }]), 42550);
+  assert.equal(tradeInTotal([]), 0);
+  assert.match(sellerDeclaration("Mobile Relation"), /lawful owner.*Mobile Relation/s);
+});
+
+test("trade-in as part payment: GST stays on the full sale price", () => {
+  // $1,090 phone, $300 trade-in: GST is 9/109 of $1,090, the customer pays $790
+  const totals = priceLines([{ quantity: 1, unitPriceCents: 109000, discountCents: 0 }], 900, true);
+  assert.equal(totals.taxCents, 9000);
+  const credit = tradeInTotal([{ priceCents: 30000 }]);
+  const due = totals.totalCents - credit;
+  assert.equal(due, 79000);
+  const allocation = allocatePayments(due, [{ paymentMethodId: "cash", methodName: "Cash", isCash: true, amountCents: 80000, reference: null }]);
+  assert.equal(allocation.changeCents, 1000);
+  // Sale.paidCents = tendered + trade-in credit; minus the change it equals the sale total
+  assert.equal(allocation.paidCents + credit - allocation.changeCents, totals.totalCents);
 });
 
 // ───────────── receipts, e-receipt email, WhatsApp ─────────────
@@ -285,6 +377,40 @@ function sampleReceipt(overrides: Partial<ReceiptData> = {}): ReceiptData {
     ...overrides,
   };
 }
+
+test("receipt header: outlet company's legal name and GST no.", () => {
+  const base = sampleReceipt().header;
+  assert.equal(base.legalName, null);
+  const profile = {
+    name: "Mobile Relation",
+    registrationNo: "201912345K",
+    taxRegistrationNo: "M90312345A",
+    address: null,
+    phone: null,
+    email: null,
+    receiptFooter: null,
+  };
+  const outlet = { code: "JUR", name: "Jurong", address: null, phone: null };
+  const withCompany = buildReceiptHeader({
+    profile,
+    outlet,
+    cashierName: "Cathy",
+    legal: { legalName: "MR Retail Pte Ltd", registrationNo: "202022222C", taxRegistrationNo: null },
+  });
+  assert.equal(withCompany.businessName, "Mobile Relation");
+  assert.equal(withCompany.legalName, "MR Retail Pte Ltd");
+  assert.equal(withCompany.registrationNo, "202022222C");
+  assert.equal(withCompany.taxRegistrationNo, null);
+  // same name as the brand → not printed twice
+  const sameName = buildReceiptHeader({
+    profile,
+    outlet,
+    cashierName: "Cathy",
+    legal: { legalName: "Mobile Relation", registrationNo: "201912345K", taxRegistrationNo: "M90312345A" },
+  });
+  assert.equal(sameName.legalName, null);
+  assert.deepEqual(parseReceiptHeader(JSON.parse(JSON.stringify(withCompany))), withCompany);
+});
 
 test("receipt header snapshot: stored JSON round-trips, old sales have none", () => {
   const header = sampleReceipt().header;

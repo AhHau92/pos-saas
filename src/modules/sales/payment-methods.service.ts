@@ -23,9 +23,10 @@ export const DEFAULT_PAYMENT_METHODS: { name: string; isCash: boolean }[] = [
   { name: "Bank Transfer", isCash: false },
 ];
 
+/** Tender methods (Cash, NETS, PayNow …). The system "Trade-in" method is never listed: it is only used by trade-ins. */
 export async function listPaymentMethods(db: TenantTx, options: { includeInactive?: boolean } = {}): Promise<PaymentMethodDTO[]> {
   const rows = await db.paymentMethod.findMany({
-    where: options.includeInactive ? undefined : { isActive: true },
+    where: options.includeInactive ? { isTradeIn: false } : { isActive: true, isTradeIn: false },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
   return rows.map((r) => ({ id: r.id, name: r.name, isCash: r.isCash, isActive: r.isActive, sortOrder: r.sortOrder }));
@@ -56,7 +57,7 @@ export async function updatePaymentMethod(ctx: ServiceContext, id: string, input
   assertCan(ctx, "settings.manage");
   const data = parseInput(schema.partial(), input);
   const existing = await ctx.db.paymentMethod.findUnique({ where: { id } });
-  if (!existing) throw new NotFoundError("Payment method not found");
+  if (!existing || existing.isTradeIn) throw new NotFoundError("Payment method not found");
   try {
     await ctx.db.paymentMethod.update({
       where: { id },
@@ -74,4 +75,19 @@ export async function seedDefaultPaymentMethods(db: TenantDb): Promise<void> {
     data: DEFAULT_PAYMENT_METHODS.map((m, index) => ({ name: m.name, isCash: m.isCash, sortOrder: (index + 1) * 10 })),
     skipDuplicates: true,
   });
+}
+
+/**
+ * The system payment method that records trade-in credit on a sale ("paid with a trade-in").
+ * Created on first use; an existing method called "Trade-in" is taken over.
+ */
+export async function ensureTradeInPaymentMethod(tx: TenantTx): Promise<{ id: string; name: string }> {
+  const existing = await tx.paymentMethod.findFirst({ where: { isTradeIn: true } });
+  if (existing) return { id: existing.id, name: existing.name };
+  const row = await tx.paymentMethod.upsert({
+    where: { name: "Trade-in" },
+    create: { name: "Trade-in", isCash: false, isTradeIn: true, isActive: true, sortOrder: 999 },
+    update: { isTradeIn: true, isCash: false, isActive: true },
+  });
+  return { id: row.id, name: row.name };
 }

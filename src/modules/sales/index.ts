@@ -47,3 +47,17 @@ export {
   type ReceiptShare,
 } from "./receipt.service";
 export { receiptEmailHtml, receiptEmailText, receiptEmailSubject } from "./receipt-email";
+// Trade-ins (buy-back and trade-in towards a sale)
+export { createBuyBack, lookupTradeInDevice, recordTradeIn, tradeInInputSchema, type TradeInDeviceLookup } from "./tradein.service";
+export { listTradeIns, getTradeInDetail, type TradeInListItem, type TradeInDetail } from "./tradein.queries";
+export {
+  SELLER_ID_TYPES,
+  SELLER_ID_LABELS,
+  TRADE_IN_CHECKS,
+  maskIdNumber,
+  sellerDeclaration,
+  tradeInTotal,
+  type SellerIdType,
+  type TradeInChecklist,
+} from "./tradein";
+export { ensureTradeInPaymentMethod } from "./payment-methods.service";

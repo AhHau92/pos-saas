@@ -18,6 +18,7 @@ const TYPE_LABELS: Record<string, string> = {
   TRANSFER_OUT: "Transfer out",
   TRANSFER_IN: "Transfer in",
   TRANSFER_RETURN: "Transfer returned",
+  TRADE_IN: "Trade-in",
   ADJUSTMENT_IN: "Adjustment +",
   ADJUSTMENT_OUT: "Adjustment −",
 };

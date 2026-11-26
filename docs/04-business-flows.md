@@ -136,7 +136,65 @@ flowchart LR
 
 > **开始使用系统时**：用"入库 → 原因：期初库存（OPENING_STOCK）"把现有的手机 IMEI 和配件数量录进去。
 
-## 6. 开通新租户（SaaS Provisioning）
+## 6. 二手机收购（Trade-in）
+
+两种情况都用同一张 **Trade-in 单（`TI-` 单号）**：
+
+| 情况 | 在哪里做 | 顾客怎么拿钱 | `TradeIn.settlement` |
+| --- | --- | --- | --- |
+| **换购**：旧机抵新机的钱 | POS → 「Trade-in」按钮 | 抵扣这张销售单 | `SALE_CREDIT` |
+| **纯回收**：只卖旧机给店 | Trade-ins → 「Buy a device」 | 现金 / PayNow / 转账（选付款方式） | `PAYOUT` |
+
+```mermaid
+flowchart TD
+    T1[扫描 / 输入旧机 IMEI] --> T2{系统查 IMEI}
+    T2 -->|还在库存 / 在途| T3[不能收购]
+    T2 -->|我们卖出过| T4[显示：哪天卖给谁]
+    T2 -->|没见过| T5[选择型号 SKU]
+    T4 --> T6
+    T5 --> T6[成色、电池、检查清单、收购价]
+    T6 --> T7[卖方资料：姓名、电话、证件、地址<br/>警方系统查询]
+    T7 --> T8{换购 or 回收}
+    T8 -->|换购| T9[POS：应付 = 总额 − 收购价]
+    T8 -->|回收| T10[选择付款方式付钱给顾客]
+    T9 --> T11[入库 TRADE_IN<br/>打印收购单给顾客签名]
+    T10 --> T11
+```
+
+**规则（新加坡）**
+
+- **GST**：IRAS 把换购当作两笔交易——卖新机照**全价**收 GST，旧机是另一笔收购。所以 POS 里 Trade-in 是一笔"付款"
+  （系统付款方式 `Trade-in`，`PaymentMethod.isTradeIn`），**不是折扣**，不会减少 GST。收购价不能大于销售总额（超过请做纯回收）。
+- **二手商品经销商规定（Secondhand Goods Dealers）**：记录卖方姓名、证件号码（NRIC / FIN / 护照）、地址；
+  每台机先在警方系统查询，查到记录（"RECORD FOUND"）就不能收。系统要求勾选"已查询"并可填查询编号 / booking 编号。
+  这两项在 Settings → Trade-ins 可以关掉（给不需要的店），**预设开启**。
+- **检查清单**：「iCloud / Google 账号已退出」是必须的（否则机器卖不出去）；其他项目选 OK / Issue，Issue 会记在 IMEI 的备注里。
+- **入库**：每台写一条 `TRADE_IN` 流水，`StockUnit.costCents` = 收购价（毛利报表、以后的 GST Gross Margin Scheme 都要用）。
+- **收购单（slip）**：80mm 打印，有店名 / 公司 / UEN、卖方资料（证件号码遮住）、机器清单、金额、卖方声明（合法拥有、非偷窃 / 分期中、已删除个人资料）和签名栏。
+- **权限**：收银员可以做换购和回收（`tradeins.create`）；完整证件号码只有店主 / 经理看得到（`tradeins.viewIdentity`），其他人只看到后 4 位（PDPA）。
+- **退款**：有换购的销售单退款时，退款金额包含抵扣的部分（旧机留在库存）。系统会提醒店员先问经理。
+- **Dashboard**：今天的收购数量、抵扣金额，以及"付出去的钱"（按付款方式，例如现金——对钱箱时要扣掉）。
+
+> 还没做：GST Gross Margin Scheme 收据（二手机按毛利计 GST）——要先问会计是否申请了 GMS，见 05-roadmap。
+
+## 7. 多公司 / GST 登记（Companies）
+
+GST 是**按公司（法律实体）登记**的。一个品牌可以有几家公司，有的有 GST、有的没有：
+
+- Settings → **Companies**：公司名称、UEN、是否 GST 登记、GST 号、地址。
+- Settings → Outlets：每间门店选它属于哪家公司。
+- 门店**没有选公司** → 用 Settings → Business 的资料（只有一家公司的店完全不用设定）。
+
+| 门店属于 | 收 GST？ | 收据 |
+| --- | --- | --- |
+| 没选公司 | 按 Business 的税率 | Business 的 UEN / GST 号 |
+| GST 登记的公司 | 按 Business 的税率（9%） | 品牌名 + 公司名、公司 UEN、公司 GST 号，标题 TAX INVOICE |
+| 没有 GST 登记的公司 | **不收**（税率 0） | 品牌名 + 公司名、公司 UEN，没有 GST 号，标题 RECEIPT |
+
+- 计算：`effectiveTax(profile, company)`（`src/modules/outlets/tax.ts`，有单元测试）。POS 画面、结账、收据都用同一个结果。
+- 结账时税率和公司资料存进销售单快照——之后改公司设定，旧收据不变。
+
+## 8. 开通新租户（SaaS Provisioning）
 
 ```mermaid
 sequenceDiagram

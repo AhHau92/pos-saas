@@ -107,6 +107,8 @@ export type SaleDetail = {
     createdBy: string;
     items: { description: string; quantity: number; amountCents: number; disposition: string }[];
   }[];
+  /** Trade-in taken as part payment (换购), if any */
+  tradeIn: { id: string; number: string; creditCents: number } | null;
   /** E-receipt history, newest first */
   receiptEmails: { id: string; toEmail: string; status: "SENT" | "FAILED"; error: string | null; sentBy: string | null; createdAt: string }[];
 };
@@ -125,6 +127,7 @@ export async function getSaleDetail(db: TenantTx, id: string): Promise<SaleDetai
         include: { createdBy: true, items: { include: { saleItem: true } } },
       },
       receiptEmails: { orderBy: { createdAt: "desc" }, take: 20, include: { sentBy: true } },
+      tradeIn: { select: { id: true, number: true, totalCents: true } },
     },
   });
   if (!s) throw new NotFoundError("Sale not found");
@@ -188,6 +191,7 @@ export async function getSaleDetail(db: TenantTx, id: string): Promise<SaleDetai
         disposition: ri.disposition,
       })),
     })),
+    tradeIn: s.tradeIn ? { id: s.tradeIn.id, number: s.tradeIn.number, creditCents: s.tradeIn.totalCents } : null,
     receiptEmails: s.receiptEmails.map((e) => ({
       id: e.id,
       toEmail: e.toEmail,

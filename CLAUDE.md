@@ -62,6 +62,14 @@ Next.js 16 (App Router, Turbopack) · React 19 · TypeScript strict · Tailwind 
   (`resolveTransfer`: LOST → write-off, RETURN → back to the sender). `IN_TRANSIT` units are changed only by the
   transfers module, never by adjustments.
 - IMEI input: `parseIdentifierInput` (newline / comma / space separated). Grades come from `UNIT_GRADES` only.
+- Tax is per outlet: `getOutletTax(db, outletId, profile)` / `effectiveTax` (`src/modules/outlets/tax.ts`). An outlet may
+  belong to a `Company` (GST-registered or not); without one it uses `BusinessProfile`. Never read `profile.taxRateBps`
+  directly for a sale.
+- Trade-ins (`src/modules/sales/tradein*.ts`): one `TradeIn` document for both buy-backs (`PAYOUT`) and trade-in credit
+  in a sale (`SALE_CREDIT`). In a sale the credit is a `Payment` with the system `isTradeIn` method — never a discount
+  (GST stays on the full price). Devices go into stock with `receiveStock(movementType: "TRADE_IN")`. Full seller ID
+  numbers are shown only with `tradeins.viewIdentity`; otherwise use `maskIdNumber`.
+- This is a SaaS for many phone shops: shop-specific rules are settings with sensible Singapore defaults, not code.
 - Prisma 7: import the client and types from `@/generated/tenant/client`, enums from `@/generated/tenant/enums`.
   Clients use the `@prisma/adapter-pg` driver adapter. Generated code is in `src/generated/` (git-ignored).
 - Next.js 16: `params` and `searchParams` are Promises (`await` them); type page `searchParams` as `SearchParams`

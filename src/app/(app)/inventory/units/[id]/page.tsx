@@ -17,7 +17,9 @@ function refLink(refType: string, refId: string, refNo: string) {
       ? `/sales/${refId}`
       : refType === "TRANSFER"
         ? `/transfers/${refId}`
-        : `/inventory/movements?q=${encodeURIComponent(refNo)}&outlet=all&from=2000-01-01`;
+        : refType === "TRADE_IN"
+          ? `/trade-ins/${refId}`
+          : `/inventory/movements?q=${encodeURIComponent(refNo)}&outlet=all&from=2000-01-01`;
   return (
     <Link href={href} className="text-indigo-600 hover:underline">
       {refNo}
@@ -31,6 +33,7 @@ const REF_LABELS: Record<string, string> = {
   REFUND: "Refund",
   TRANSFER: "Transfer",
   ADJUSTMENT: "Adjustment",
+  TRADE_IN: "Trade-in",
 };
 
 export default async function UnitDetailPage({ params }: { params: Promise<{ id: string }> }) {

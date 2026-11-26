@@ -11,3 +11,14 @@ export type { SaleDetail, SaleListItem, SaleStatusValue } from "./sales.queries"
 export { receiptTitle, receiptText, formatTaxRate, maskPhone, maskEmail } from "./receipt";
 export type { ReceiptData, ReceiptHeader } from "./receipt";
 export type { ReceiptShare } from "./receipt.service";
+export {
+  SELLER_ID_TYPES,
+  SELLER_ID_LABELS,
+  TRADE_IN_CHECKS,
+  maskIdNumber,
+  missingRequiredChecks,
+  tradeInTotal,
+} from "./tradein";
+export type { SellerIdType, TradeInChecklist, TradeInCheckKey } from "./tradein";
+export type { TradeInDeviceLookup } from "./tradein.service";
+export type { TradeInListItem, TradeInDetail } from "./tradein.queries";

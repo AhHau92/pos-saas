@@ -16,6 +16,13 @@ export type DashboardData = {
     itemsSold: number;
   };
   paymentsByMethod: { methodName: string; amountCents: number }[];
+  /** Devices bought from customers today: trade-ins in sales and buy-backs paid out (cash leaves the drawer) */
+  tradeIns: {
+    count: number;
+    totalCents: number;
+    creditCents: number;
+    payoutsByMethod: { methodName: string; amountCents: number }[];
+  };
   byOutlet: { outletId: string; outletCode: string; salesCount: number; salesCents: number }[];
   stock: { serializedUnits: number; quantityItems: number; costValueCents: number };
   lowStock: LowStockItem[];
@@ -31,10 +38,11 @@ export async function getDashboard(
   const outletFilter = options.allOutlets ? {} : { outletId: options.outletId };
   const salesWhere = { ...outletFilter, createdAt: { gte: start } };
 
-  const [sales, refunds, payments, outlets, units, levels, lowStock, incoming, recent] = await Promise.all([
+  const [sales, refunds, payments, tradeIns, outlets, units, levels, lowStock, incoming, recent] = await Promise.all([
     db.sale.findMany({ where: salesWhere, include: { items: true } }),
     db.refund.findMany({ where: { ...outletFilter, createdAt: { gte: start } } }),
     db.payment.findMany({ where: { sale: salesWhere } }),
+    db.tradeIn.findMany({ where: { ...outletFilter, createdAt: { gte: start } } }),
     db.outlet.findMany({ where: { isActive: true }, orderBy: { code: "asc" } }),
     db.stockUnit.aggregate({
       where: { status: "IN_STOCK", ...outletFilter },
@@ -75,6 +83,13 @@ export async function getDashboard(
   const byMethod = new Map<string, number>();
   for (const p of payments) byMethod.set(p.methodName, (byMethod.get(p.methodName) ?? 0) + p.amountCents);
 
+  const payouts = new Map<string, number>();
+  for (const t of tradeIns) {
+    if (t.settlement !== "PAYOUT") continue;
+    const name = t.paymentMethodName ?? "Other";
+    payouts.set(name, (payouts.get(name) ?? 0) + t.totalCents);
+  }
+
   const byOutlet = outlets.map((o) => {
     const own = sales.filter((s) => s.outletId === o.id);
     return {
@@ -98,6 +113,14 @@ export async function getDashboard(
     paymentsByMethod: [...byMethod.entries()]
       .map(([methodName, amountCents]) => ({ methodName, amountCents }))
       .sort((a, b) => b.amountCents - a.amountCents),
+    tradeIns: {
+      count: tradeIns.length,
+      totalCents: tradeIns.reduce((s, t) => s + t.totalCents, 0),
+      creditCents: tradeIns.filter((t) => t.settlement === "SALE_CREDIT").reduce((s, t) => s + t.totalCents, 0),
+      payoutsByMethod: [...payouts.entries()]
+        .map(([methodName, amountCents]) => ({ methodName, amountCents }))
+        .sort((a, b) => b.amountCents - a.amountCents),
+    },
     byOutlet: options.allOutlets ? byOutlet : [],
     stock: {
       serializedUnits: Number(units._count?._all ?? 0),

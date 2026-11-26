@@ -29,6 +29,7 @@ export function ReceiptView({
     <div className="mx-auto w-[80mm] bg-white px-3 py-4 font-mono text-[11px] leading-snug text-black shadow print:shadow-none">
       <div className="text-center">
         <div className="text-sm font-bold">{h.businessName}</div>
+        {h.legalName ? <div>{h.legalName}</div> : null}
         {h.registrationNo ? <div>UEN: {h.registrationNo}</div> : null}
         {h.taxRegistrationNo ? (
           <div>

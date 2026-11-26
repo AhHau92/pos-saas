@@ -53,6 +53,8 @@ enum MovementType {
   TRANSFER_IN
   /// Goods that never arrived and were sent back to the sending outlet
   TRANSFER_RETURN
+  /// Used device bought from a customer (trade-in / buy-back)
+  TRADE_IN
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
 }
@@ -63,6 +65,7 @@ enum DocumentType {
   REFUND
   TRANSFER
   ADJUSTMENT
+  TRADE_IN
 }
 
 enum AdjustmentReason {
@@ -112,6 +115,21 @@ enum ReceiptEmailStatus {
   FAILED
 }
 
+/// Seller identification for trade-ins (Singapore: Secondhand Goods Dealers Rules)
+enum SellerIdType {
+  NRIC
+  FIN
+  PASSPORT
+  OTHER
+}
+
+enum TradeInSettlement {
+  /// The customer was paid (cash / PayNow / bank transfer …) — buy-back
+  PAYOUT
+  /// The value paid for a POS sale — trade-in towards a purchase
+  SALE_CREDIT
+}
+
 // ───────────── Organisation & settings ─────────────
 
 /// Single row (id = 1)
@@ -134,7 +152,29 @@ model BusinessProfile {
   receiptFooter     String?
   /// Country calling code for customer phone numbers without one (WhatsApp links), e.g. "65"
   phoneCountryCode  String   @default("65")
+  /// Trade-ins: seller's ID type + number + address are required (Singapore secondhand dealers: on)
+  tradeInRequireSellerId    Boolean @default(true)
+  /// Trade-ins: staff must confirm the device was screened on the Police system (Singapore: on)
+  tradeInRequirePoliceCheck Boolean @default(true)
   updatedAt         DateTime @updatedAt
+}
+
+/// Legal entity (company). GST is registered per company, so a shop group can have GST-registered
+/// and non-registered outlets. Outlets without a company use the business profile's details.
+model Company {
+  id                String   @id @default(cuid())
+  /// Legal name, e.g. "Mobile Relation 1 Pte Ltd"
+  name              String
+  /// UEN in Singapore
+  registrationNo    String?
+  gstRegistered     Boolean  @default(true)
+  /// GST registration no. (only when gstRegistered)
+  taxRegistrationNo String?
+  address           String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  outlets           Outlet[]
 }
 
 model Outlet {
@@ -145,6 +185,9 @@ model Outlet {
   address   String?
   phone     String?
   isActive  Boolean  @default(true)
+  /// Legal entity this outlet trades as (GST registration, UEN on receipts). Null = business profile.
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -160,6 +203,7 @@ model Outlet {
   transfersIn    StockTransfer[]     @relation("TransferTo")
   sales          Sale[]
   refunds        Refund[]
+  tradeIns       TradeIn[]
 }
 
 model User {
@@ -187,6 +231,7 @@ model User {
   unitEvents          StockUnitEvent[]
   adjustments         StockAdjustment[]
   receiptEmails       ReceiptEmail[]
+  tradeInsCreated     TradeIn[]           @relation("TradeInCreatedBy")
 }
 
 /// Running counters for document numbers (PO-2026-00001 ...)
@@ -257,6 +302,7 @@ model ProductVariant {
   goodsReceiptItems  GoodsReceiptItem[]
   transferItems      StockTransferItem[]
   saleItems          SaleItem[]
+  tradeInItems       TradeInItem[]
 
   @@index([productId])
 }
@@ -306,6 +352,7 @@ model StockUnit {
   movements     InventoryMovement[]
   transferItems StockTransferItem[]
   saleItems     SaleItem[]
+  tradeInItems  TradeInItem[]
 
   @@index([variantId, outletId, status])
   @@index([outletId, status])
@@ -529,6 +576,7 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sales     Sale[]
+  tradeIns  TradeIn[]
 }
 
 model PaymentMethod {
@@ -536,11 +584,14 @@ model PaymentMethod {
   name      String    @unique
   /// Only cash payments can be over-tendered (change given)
   isCash    Boolean   @default(false)
+  /// System method for trade-in credit used in a sale (created automatically, hidden from tender buttons)
+  isTradeIn Boolean   @default(false)
   isActive  Boolean   @default(true)
   sortOrder Int       @default(0)
   createdAt DateTime  @default(now())
   payments  Payment[]
   refunds   Refund[]
+  tradeIns  TradeIn[]
 }
 
 model Sale {
@@ -582,6 +633,8 @@ model Sale {
   payments      Payment[]
   refunds       Refund[]
   receiptEmails ReceiptEmail[]
+  /// Trade-in used as part payment (换购)
+  tradeIn       TradeIn?
 
   @@index([outletId, createdAt])
   @@index([createdAt])
@@ -678,4 +731,66 @@ model ReceiptEmail {
   createdAt DateTime           @default(now())
 
   @@index([saleId, createdAt])
+}
+
+/// Used devices bought from customers: buy-back (PAYOUT) or trade-in towards a sale (SALE_CREDIT).
+/// The seller particulars are the record required by the Secondhand Goods Dealers Rules (Singapore).
+/// See docs/04-business-flows.md §6.
+model TradeIn {
+  id                String            @id @default(cuid())
+  /// TI-2026-00001
+  number            String            @unique
+  outletId          String
+  outlet            Outlet            @relation(fields: [outletId], references: [id])
+  createdById       String
+  createdBy         User              @relation("TradeInCreatedBy", fields: [createdById], references: [id])
+  customerId        String?
+  customer          Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  sellerName        String
+  sellerIdType      SellerIdType?
+  sellerIdNumber    String?
+  sellerPhone       String?
+  sellerAddress     String?
+  /// Staff confirmed the devices were screened on the Police system (no record found)
+  policeScreened    Boolean           @default(false)
+  policeReference   String?
+  /// Booking / quote number from the shop's website, if any
+  bookingRef        String?
+  totalCents        Int
+  settlement        TradeInSettlement
+  /// PAYOUT: how the customer was paid
+  paymentMethodId   String?
+  paymentMethod     PaymentMethod?    @relation(fields: [paymentMethodId], references: [id])
+  paymentMethodName String?
+  payoutReference   String?
+  /// SALE_CREDIT: the sale it paid for
+  saleId            String?           @unique
+  sale              Sale?             @relation(fields: [saleId], references: [id])
+  notes             String?
+  createdAt         DateTime          @default(now())
+  items             TradeInItem[]
+
+  @@index([outletId, createdAt])
+  @@index([createdAt])
+}
+
+model TradeInItem {
+  id            String         @id @default(cuid())
+  tradeInId     String
+  tradeIn       TradeIn        @relation(fields: [tradeInId], references: [id], onDelete: Cascade)
+  variantId     String
+  variant       ProductVariant @relation(fields: [variantId], references: [id])
+  stockUnitId   String
+  stockUnit     StockUnit      @relation(fields: [stockUnitId], references: [id])
+  /// Snapshots
+  description   String
+  identifier    String
+  grade         String?
+  batteryHealth Int?
+  /// Condition checks, e.g. {"accountRemoved": true, "screenOk": false}
+  checklist     Json?
+  priceCents    Int
+
+  @@index([tradeInId])
+  @@index([stockUnitId])
 }

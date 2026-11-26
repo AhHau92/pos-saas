@@ -43,7 +43,7 @@ export type ProvisionTenantInput = z.input<typeof provisionSchema>;
 
 /**
  * Creates a tenant end-to-end: Control DB record → database → schema → seed data → subscription.
- * See docs/04-business-flows.md §6.
+ * See docs/04-business-flows.md §8.
  */
 export async function provisionTenant(input: unknown): Promise<{ tenantId: string; slug: string; dbName: string }> {
   const data = parseInput(provisionSchema, input);

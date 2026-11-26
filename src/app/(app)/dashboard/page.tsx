@@ -129,6 +129,34 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             )}
           </Card>
 
+          {data.tradeIns.count > 0 ? (
+            <Card>
+              <CardHeader
+                title="Trade-ins today"
+                description={`${data.tradeIns.count} record${data.tradeIns.count === 1 ? "" : "s"} · ${money(data.tradeIns.totalCents)}`}
+              />
+              <ul className="divide-y divide-slate-100 text-sm">
+                {data.tradeIns.creditCents > 0 ? (
+                  <li className="flex justify-between px-5 py-2.5">
+                    <span className="text-slate-600">Credited to sales</span>
+                    <span className="font-medium tabular-nums">{money(data.tradeIns.creditCents)}</span>
+                  </li>
+                ) : null}
+                {data.tradeIns.payoutsByMethod.map((p) => (
+                  <li key={p.methodName} className="flex justify-between px-5 py-2.5">
+                    <span className="text-slate-600">Paid out · {p.methodName}</span>
+                    <span className="font-medium tabular-nums text-rose-700">−{money(p.amountCents)}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="border-t border-slate-100 px-5 py-2.5 text-sm">
+                <Link href="/trade-ins" className="font-medium text-indigo-600 hover:underline">
+                  View trade-ins →
+                </Link>
+              </div>
+            </Card>
+          ) : null}
+
           {data.incomingTransfers.length > 0 ? (
             <Card>
               <CardHeader title="Incoming transfers" description="Waiting for you to confirm receipt" />

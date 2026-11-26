@@ -8,6 +8,7 @@ function buildNav(role: Role): NavItem[] {
   const nav: NavItem[] = [{ href: "/dashboard", label: "Dashboard", icon: "dashboard" }];
   if (can(role, "pos.sell")) nav.push({ href: "/pos", label: "POS", icon: "pos" });
   if (can(role, "sales.view")) nav.push({ href: "/sales", label: "Sales", icon: "receipt" });
+  if (can(role, "tradeins.view")) nav.push({ href: "/trade-ins", label: "Trade-ins", icon: "phone" });
   if (can(role, "products.view")) nav.push({ href: "/products", label: "Products", icon: "box" });
   if (can(role, "inventory.view")) {
     const children = [
@@ -38,6 +39,7 @@ function buildNav(role: Role): NavItem[] {
       children: [
         { href: "/settings", label: "Business profile" },
         { href: "/settings/outlets", label: "Outlets" },
+        { href: "/settings/companies", label: "Companies" },
         { href: "/settings/users", label: "Users" },
         { href: "/settings/payment-methods", label: "Payment methods" },
       ],
